@@ -146,7 +146,6 @@ describe.each(['opencode', 'opencode2'] as const)('%s plugin on OpenCode 2', (ag
         hook: async () => undefined
       },
       event: {
-        // oxlint-disable-next-line require-yield -- SAFETY: Empty stream; the loop must still terminate.
         subscribe: async function* () {}
       }
     })
