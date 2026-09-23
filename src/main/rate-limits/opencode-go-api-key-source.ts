@@ -157,8 +157,10 @@ export async function readOpenCodeCredentialDatabaseGoKey(): Promise<string | nu
 /**
  * Resolve the OpenCode Go API key in the documented precedence order.
  *
- * Settings override, then `OPENCODE_API_KEY`, then whatever OpenCode itself
- * stored on `/connect` — `auth.json` for 1.x, the credential table for 2.x.
+ * Settings override, then whatever OpenCode itself stored on `/connect` —
+ * `auth.json` for 1.x, the credential table for 2.x — then `OPENCODE_API_KEY`.
+ * The stored key outranks the env var because OpenCode applies it after env,
+ * and the env var is shared with the Zen provider.
  * @param input.settingsOverride - The key a user pasted into Orca's settings.
  * @param input.environment - Process environment to read; injectable for tests.
  * @returns The first key found and the tier it came from, or `missing`.
@@ -172,10 +174,6 @@ export async function resolveOpenCodeGoApiKey(input: {
   if (override) {
     return { status: 'found', key: override, tier: 'settings' }
   }
-  const fromEnvironment = trimmedKey(environment[OPENCODE_API_KEY_ENV])
-  if (fromEnvironment) {
-    return { status: 'found', key: fromEnvironment, tier: 'environment' }
-  }
   const fromAuthFile = readOpenCodeAuthFileGoKey(environment)
   if (fromAuthFile) {
     return { status: 'found', key: fromAuthFile, tier: 'opencode-auth-file' }
@@ -183,6 +181,10 @@ export async function resolveOpenCodeGoApiKey(input: {
   const fromDatabase = await readOpenCodeCredentialDatabaseGoKey()
   if (fromDatabase) {
     return { status: 'found', key: fromDatabase, tier: 'opencode-credential-database' }
+  }
+  const fromEnvironment = trimmedKey(environment[OPENCODE_API_KEY_ENV])
+  if (fromEnvironment) {
+    return { status: 'found', key: fromEnvironment, tier: 'environment' }
   }
   return { status: 'missing' }
 }

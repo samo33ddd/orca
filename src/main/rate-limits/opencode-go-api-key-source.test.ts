@@ -85,11 +85,22 @@ describe('resolveOpenCodeGoApiKey', () => {
     ).resolves.toEqual({ status: 'found', key: SETTINGS_KEY, tier: 'settings' })
   })
 
-  it('falls back to OPENCODE_API_KEY when no override is set', async () => {
+  it('prefers the key OpenCode saved on /connect over OPENCODE_API_KEY, as OpenCode does', async () => {
     process.env.OPENCODE_API_KEY = ENVIRONMENT_KEY
     writeAuthFile({ 'opencode-go': { type: 'api', key: AUTH_FILE_KEY } })
 
     await expect(resolveOpenCodeGoApiKey({ settingsOverride: '   ' })).resolves.toEqual({
+      status: 'found',
+      key: AUTH_FILE_KEY,
+      tier: 'opencode-auth-file'
+    })
+  })
+
+  it('falls back to OPENCODE_API_KEY when OpenCode stored no key', async () => {
+    process.env.OPENCODE_API_KEY = ENVIRONMENT_KEY
+    writeAuthFile({ anthropic: { type: 'api', key: 'not-the-go-key' } })
+
+    await expect(resolveOpenCodeGoApiKey({})).resolves.toEqual({
       status: 'found',
       key: ENVIRONMENT_KEY,
       tier: 'environment'

@@ -102,7 +102,7 @@ export function renderOpenCodeAccountsSection(model: AccountsPaneSectionModel): 
         )}
         description={translate(
           'auto.components.settings.AccountsPane.opencodeGo.apiKey.description',
-          'Optional override. Orca otherwise uses OPENCODE_API_KEY or the key OpenCode saved when you ran /connect.'
+          'Optional override. Orca otherwise uses the key OpenCode saved when you ran /connect, then OPENCODE_API_KEY.'
         )}
         keywords={['opencode', 'go', 'api', 'key', 'connect', 'rate limit', 'status bar']}
         className="space-y-2"
@@ -121,7 +121,7 @@ export function renderOpenCodeAccountsSection(model: AccountsPaneSectionModel): 
             commit={(opencodeGoApiKey) => updateSettings({ opencodeGoApiKey })}
             placeholder={translate(
               'auto.components.settings.AccountsPane.opencodeGo.apiKey.placeholder',
-              'Leave blank to use OPENCODE_API_KEY or the key saved by /connect'
+              'Leave blank to use the key saved by /connect or OPENCODE_API_KEY'
             )}
             spellCheck={false}
             className="flex-1 text-xs"
