@@ -389,6 +389,8 @@ export type GlobalSettings = {
   opencodeSessionCookie: string
   /** Optional OpenCode Go workspace ID override; when set, skips the workspaces lookup and fetches usage directly. */
   opencodeWorkspaceId: string
+  /** Optional OpenCode Go API key override. Takes precedence over OPENCODE_API_KEY and OpenCode's own stored key. Stored encrypted. */
+  opencodeGoApiKey: string
   /** Optional MiniMax group id. When empty, the usage fetcher extracts minimax_group_id_v2 from the cookie. */
   minimaxGroupId: string
   /** Comma-separated MiniMax model names to show in the status bar usage window. */
