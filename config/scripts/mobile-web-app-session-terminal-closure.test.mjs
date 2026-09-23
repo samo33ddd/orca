@@ -425,8 +425,16 @@ const MERMAID_PACKAGE = 'node_modules/mermaid/'
  *
  *   modules        4215 -> 4216   (+1)
  *   local modules  1029 -> 1030   (+1)
+ *
+ * Jcode joining the agent catalog then added `src/shared/agent-icons/jcode.png`, which
+ * `mobile/src/components/mobile-agent-icon-assets.ts` requires alongside every other
+ * agent icon. One local module, measured; an agent icon is a leaf asset, so it brings
+ * nothing else with it.
+ *
+ *   modules        4216 -> 4217   (+1)
+ *   local modules  1030 -> 1031   (+1)
  */
-const SESSION_ROUTE_MODULES = 4216
+const SESSION_ROUTE_MODULES = 4217
 
 /** What the page enters this route through once the route is a switch with a `.web.tsx` sibling. */
 const ROUTE_ENTRY = [
