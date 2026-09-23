@@ -76,7 +76,8 @@ export const MANAGED_AGENT_HOOK_SCRIPT_REFRESHERS: readonly ManagedAgentHookScri
   ['copilot', () => copilotHookService.refreshManagedScripts()],
   ['devin', () => devinHookService.refreshManagedScripts()],
   ['kimi', () => kimiHookService.refreshManagedScripts()],
-  ['muse', () => museHookService.refreshManagedScripts()]
+  ['muse', () => museHookService.refreshManagedScripts()],
+  ['jcode', () => jcodeHookService.refreshManagedScripts()]
 ]
 
 export const MANAGED_AGENT_HOOK_REMOVERS: readonly ManagedAgentHookRemover[] = [
