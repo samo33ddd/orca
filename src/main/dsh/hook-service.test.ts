@@ -1,4 +1,12 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -147,6 +155,30 @@ describe('DshHookService', () => {
     const status = service.getStatus()
     expect(status.state).toBe('not_installed')
     expect(status.detail).toContain('/somewhere/else.json')
+  })
+
+  it('keeps an owner-only patch file owner-only', () => {
+    // CWE-732: the temp+rename replacement must not widen the file to the umask default.
+    const userRows = '- id: llm-deepseek\n  config: {}\n'
+    mkdirSync(join(home, '.dsh'), { recursive: true })
+    writeFileSync(configPath(), userRows, 'utf-8')
+    chmodSync(configPath(), 0o600)
+
+    expect(new DshHookService().install().state).toBe('installed')
+    expect(statSync(configPath()).mode & 0o777).toBe(0o600)
+  })
+
+  it('refuses a flow-style patch file instead of corrupting it', () => {
+    // Appending a block entry after `[…]` is invalid YAML — DSH would then fail to load the
+    // user's own layer as well as Orca's hooks, so install must change nothing.
+    const flow = '[{ id: llm-deepseek }]\n'
+    mkdirSync(join(home, '.dsh'), { recursive: true })
+    writeFileSync(configPath(), flow, 'utf-8')
+
+    const status = new DshHookService().install()
+    expect(status.state).toBe('error')
+    expect(status.detail).toContain('flow-style sequence')
+    expect(readFileSync(configPath(), 'utf-8')).toBe(flow)
   })
 
   it('honours DSH_HOME', () => {

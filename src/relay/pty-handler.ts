@@ -849,6 +849,16 @@ export class PtyHandler {
     if (!result.TERM) {
       result.TERM = 'xterm-256color'
     }
+    // Why: the relay's own process env can carry pane identity (it is itself startable from
+    // an Orca pane), and unlike the local and daemon builders this one never dropped it. A
+    // spawn that specified no identity would then inherit someone else's, and every agent's
+    // hook would report against that pane. Drop it before mirroring, so an alias can only
+    // ever carry identity this spawn actually asked for.
+    for (const key of ['ORCA_PANE_KEY', 'ORCA_AGENT_LAUNCH_TOKEN'] as const) {
+      if (!rendererEnv || !Object.hasOwn(rendererEnv, key)) {
+        delete result[key]
+      }
+    }
     // Why here and not only in the local/daemon builders: a remote pane's env is built HERE,
     // and the client forwards only the canonical pane-identity names. An agent whose harness
     // scrubs those names (DSH drops any env var whose name contains KEY or TOKEN) would find

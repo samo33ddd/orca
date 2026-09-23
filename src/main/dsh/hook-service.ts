@@ -108,7 +108,8 @@ function parseJsonOrNull(text: string): unknown {
 function writePatchText(configPath: string, text: string): void {
   mkdirSync(dirname(configPath), { recursive: true })
   // Why writeHooksJson: it owns the temp+rename and the rolling .bak this file needs too.
-  writeHooksJson(configPath, {}, { serialized: text })
+  // Why preserveMode: an owner-only patch file must not widen to the umask default on rewrite.
+  writeHooksJson(configPath, {}, { serialized: text, preserveMode: true })
 }
 
 function status(
@@ -186,6 +187,15 @@ export class DshHookService {
       { serialized: buildDshManagedHooksFile(getDshManagedCommand(scriptPath)) }
     )
     const nextText = applyManagedDshPatch(patchText, managedHooksPath)
+    if (nextText === null) {
+      // Why refuse rather than edit: YAML forbids a block entry after a flow sequence, so
+      // appending here would leave DSH unable to parse the user's own patch layer either.
+      return status(
+        configPath,
+        'error',
+        'The DSH home patch is a flow-style sequence ([…]); rewrite it as a block sequence (one `- ` entry per line) so Orca can add its hooks without breaking it'
+      )
+    }
     if (nextText !== patchText) {
       writePatchText(configPath, nextText)
     }
@@ -205,11 +215,15 @@ export class DshHookService {
         remoteManagedHooksPath,
         buildDshManagedHooksFile(getDshRemoteManagedCommand(remoteScriptPath))
       )
-      await writeTextFileRemoteAtomic(
-        sftp,
-        remoteConfigPath,
-        applyManagedDshPatch(body, remoteManagedHooksPath)
-      )
+      const nextText = applyManagedDshPatch(body, remoteManagedHooksPath)
+      if (nextText === null) {
+        return status(
+          remoteConfigPath,
+          'error',
+          'The remote DSH home patch is a flow-style sequence ([…]); rewrite it as a block sequence so Orca can add its hooks without breaking it'
+        )
+      }
+      await writeTextFileRemoteAtomic(sftp, remoteConfigPath, nextText)
       return status(remoteConfigPath, 'installed', null, true)
     } catch (err) {
       return status(remoteConfigPath, 'error', err instanceof Error ? err.message : String(err))

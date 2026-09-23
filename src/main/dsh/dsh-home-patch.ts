@@ -103,10 +103,32 @@ function isComment(line: string): boolean {
   return line.trim().startsWith('#')
 }
 
-/** True when the document body is nothing but an empty flow sequence (`[]`). */
+function documentBody(lines: readonly string[]): readonly string[] {
+  return lines.filter((line) => !isBlank(line) && !isComment(line))
+}
+
+/** Strips a trailing `# …` so `[] # keep empty` reads as the empty sequence it is. */
+function withoutTrailingComment(line: string): string {
+  const hash = line.indexOf('#')
+  return (hash === -1 ? line : line.slice(0, hash)).trim()
+}
+
+/** True when the body is the empty flow sequence, with or without a trailing comment. */
 function isEmptyFlowDocument(lines: readonly string[]): boolean {
-  const body = lines.filter((line) => !isBlank(line) && !isComment(line))
-  return body.length === 1 && body[0].trim() === EMPTY_FLOW_SEQUENCE
+  const body = documentBody(lines)
+  return body.length === 1 && withoutTrailingComment(body[0]) === EMPTY_FLOW_SEQUENCE
+}
+
+/**
+ * True when the body is a NON-EMPTY flow sequence (`[a, b]`, or one spread over lines).
+ *
+ * Why it matters: YAML forbids a block entry after a flow sequence, so appending Orca's
+ * `- insert:` would produce a file DSH cannot parse — losing the user's own patch layer as
+ * well as Orca's hooks. There is no safe in-place edit, so install refuses instead.
+ */
+function isNonEmptyFlowDocument(lines: readonly string[]): boolean {
+  const body = documentBody(lines)
+  return body.length > 0 && body[0].trimStart().startsWith('[') && !isEmptyFlowDocument(lines)
 }
 
 function withoutTrailingBlanks(lines: readonly string[]): readonly string[] {
@@ -122,8 +144,11 @@ function joinPreservingTrailingNewline(lines: readonly string[]): string {
 /**
  * Install (or refresh) Orca's managed region so the DSH hook bridge reads
  * `managedHooksPath`. Everything outside the markers is preserved.
+ *
+ * Returns null when the file cannot be edited safely — see isNonEmptyFlowDocument. The
+ * caller reports that; it must never write a file DSH would then fail to parse.
  */
-export function applyManagedDshPatch(text: string, managedHooksPath: string): string {
+export function applyManagedDshPatch(text: string, managedHooksPath: string): string | null {
   const lines = splitLines(text)
   const block = buildManagedBlock(managedHooksPath)
   const region = findManagedDshPatchRegion(text)
@@ -134,10 +159,17 @@ export function applyManagedDshPatch(text: string, managedHooksPath: string): st
       ...lines.slice(region.endLine + 1)
     ])
   }
-  // Why dropped: `- item` after `[]` is a parse error, and a file whose whole body is `[]`
-  // has nothing else to preserve. Comments survive the filter.
+  if (isNonEmptyFlowDocument(lines)) {
+    return null
+  }
+  // Why dropped: `- item` after `[]` is a parse error, and an empty sequence has nothing to
+  // preserve. Only the token goes — a trailing comment on that line stays.
   const kept = isEmptyFlowDocument(lines)
-    ? lines.filter((line) => line.trim() !== EMPTY_FLOW_SEQUENCE)
+    ? lines.map((line) =>
+        withoutTrailingComment(line) === EMPTY_FLOW_SEQUENCE
+          ? line.slice(line.indexOf(EMPTY_FLOW_SEQUENCE) + EMPTY_FLOW_SEQUENCE.length)
+          : line
+      )
     : lines
   return joinPreservingTrailingNewline([...withoutTrailingBlanks(kept), ...block])
 }
