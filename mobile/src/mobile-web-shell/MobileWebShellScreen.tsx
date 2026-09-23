@@ -41,6 +41,7 @@ import { useShellStackPop } from './use-shell-stack-pop'
 import { useMobileWebShellSession } from './use-mobile-web-shell-session'
 import { usePageHostSnapshot } from './use-page-host-snapshot'
 import { SHELL_OPENING_LABEL, ShellPageCover, ShellWaitingFrame } from './ShellWaitingFrame'
+import { pageSafeAreaInsets, usePublishedSafeAreaInsets } from './page-safe-area-insets'
 
 function failureMessage(reason: MobileWebShellFailureCause): string {
   switch (reason) {
@@ -211,6 +212,17 @@ export function MobileWebShellScreen({
   // Which mount the notice was dismissed on, not whether it was: a later refusal opens its own
   // generation under a new session id, so it is not silenced by a tap on the one before it.
   const [noticeDismissedFor, setNoticeDismissedFor] = useState<string | null>(null)
+  // Per session for the reason the notice is: a remount is a new document that has not said yet.
+  const [safeAreaOwnedBy, setSafeAreaOwnedBy] = useState<string | null>(null)
+  const readySessionId = state.kind === 'ready' ? state.sessionId : null
+  // Edge-to-edge only for a page that pads for the bars itself; an older page keeps the strips.
+  const pageOwnsSafeArea = readySessionId !== null && safeAreaOwnedBy === readySessionId
+  const noticeShown = updateNotice !== null && noticeDismissedFor !== readySessionId
+  const pageInsets = pageSafeAreaInsets({
+    insets,
+    keyboardInset,
+    topCovered: noticeShown
+  })
   const { snapshot, unreadable, readStorage, refreshStorage, writeStorage } = usePageHostSnapshot(
     hostId,
     route.pathname
@@ -232,6 +244,10 @@ export function MobileWebShellScreen({
   const bridge = useMobileWebShellBridge({
     hostId,
     route,
+    safeAreaInsets: pageInsets,
+    onPageOwnsSafeArea: (owns) => {
+      setSafeAreaOwnedBy(owns ? readySessionId : null)
+    },
     pageRoutes,
     pageRouteGrants,
     routeGrants,
@@ -312,6 +328,8 @@ export function MobileWebShellScreen({
     publishRoute(route)
   }, [publishRoute, route])
 
+  usePublishedSafeAreaInsets(bridge.publishSafeAreaInsets, pageInsets)
+
   // The navigation object rather than the router: what this takes away is this screen's own place
   // on the stack, which is a screen option, and the router has no member that says it.
   useShellPageBack({
@@ -360,18 +378,24 @@ export function MobileWebShellScreen({
     <View
       style={[
         styles.shellRoot,
-        { paddingTop: insets.top, paddingBottom: Math.max(insets.bottom, keyboardInset) }
+        // Edge-to-edge like a native screen: the page paints under the bars and pads through its
+        // own SafeAreaViews. Only the keyboard strip stays off the view, since the page cannot see it.
+        pageOwnsSafeArea
+          ? { paddingBottom: keyboardInset }
+          : { paddingTop: insets.top, paddingBottom: Math.max(insets.bottom, keyboardInset) }
       ]}
       testID="mobile-web-shell-ready"
     >
       {/* Above the page and dismissible, never in front of it: the workspace below this line
           works, and the only thing that did not happen is the update to a newer one. */}
-      {updateNotice !== null && noticeDismissedFor !== state.sessionId && (
-        <HostRouteNoticeBanner
-          message={updateNoticeMessage(updateNotice)}
-          tone="failure"
-          onDismiss={() => setNoticeDismissedFor(state.sessionId)}
-        />
+      {updateNotice !== null && noticeShown && (
+        <View style={{ paddingTop: pageOwnsSafeArea ? insets.top : 0 }}>
+          <HostRouteNoticeBanner
+            message={updateNoticeMessage(updateNotice)}
+            tone="failure"
+            onDismiss={() => setNoticeDismissedFor(state.sessionId)}
+          />
+        </View>
       )}
       <OrcaMobileWebShellView
         key={state.sessionId}

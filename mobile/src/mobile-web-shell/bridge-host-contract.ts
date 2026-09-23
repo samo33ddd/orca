@@ -4,6 +4,7 @@ import type { BridgeSessionBack } from './bridge-host-back'
 import type { BridgeRefusal } from './bridge/bridge-caps'
 import type { BridgeInitHost, BridgeInitRoute } from './bridge/bridge-envelope'
 import type { BridgeClearableRouteParam } from './bridge/bridge-route-update'
+import type { BridgeSafeAreaInsets } from './bridge/bridge-safe-area-insets'
 import type { BridgeHapticsKind } from './bridge/bridge-haptics-notify'
 import type { BridgeErrorCapture } from './bridge/bridge-error-capture'
 import type { BridgeNativeVerb } from './bridge/bridge-native-verbs'
@@ -128,6 +129,12 @@ export type BridgeHostOptions = {
   sessionBack?: BridgeSessionBack
   /** The host the page is showing, minus the credential the bridge already carries for it. */
   host: BridgeInitHost
+  /** How much of the WebView sits under a system bar when it is drawn edge-to-edge. Zeros when
+   *  absent; moved later with `publishSafeAreaInsets`. */
+  safeAreaInsets?: BridgeSafeAreaInsets
+  /** Whether the document that just said `ready` pads for the system bars itself
+   *  (`BRIDGE_SAFE_AREA_ACCEPT`). Reported on every `ready`, so a reload re-states it. */
+  onPageOwnsSafeArea?: (owns: boolean) => void
   /**
    * This device's identity to that host, as the native screens already send it, swapped in for the
    * page's placeholder on the way out. Read at forward time rather than captured: the host outlives

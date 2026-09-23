@@ -19,6 +19,10 @@ import { createBridgeHostFrames } from './bridge-host-frames'
 import { createBridgeHostBack, type BridgeSessionBack } from './bridge-host-back'
 import { createBridgeNotifyForwarder } from './bridge-host-notify'
 import { createBridgeHostRoute } from './bridge-host-route'
+import {
+  BRIDGE_SAFE_AREA_ACCEPT,
+  type BridgeSafeAreaInsets
+} from './bridge/bridge-safe-area-insets'
 import type { BridgeHostOptions } from './bridge-host-contract'
 
 // Re-exported so a caller reaches the host and what it reports through one module.
@@ -39,6 +43,8 @@ export type BridgeHost = {
    * applied.
    */
   publishRoute: (next: BridgeInitRoute) => void
+  /** Hands this session moved safe-area insets over the same re-sent `init` a route update takes. */
+  publishSafeAreaInsets: (next: BridgeSafeAreaInsets) => void
   /**
    * Hands the page one Back press. False when this document never said it takes one, which is
    * every page older than the frame; the caller then leaves the key to the navigator.
@@ -83,7 +89,8 @@ export function createBridgeHost(options: BridgeHostOptions): BridgeHost {
     sendInit: () => {
       sendInit()
     },
-    onRefused: (issue) => options.onDiagnostic?.({ kind: 'route-update-refused', issue })
+    onRefused: (issue) => options.onDiagnostic?.({ kind: 'route-update-refused', issue }),
+    ...(options.safeAreaInsets === undefined ? {} : { safeAreaInsets: options.safeAreaInsets })
   })
   let closed = false
   // One document's turn at the bridge. `close` ends it and the next `ready` begins the next one;
@@ -158,6 +165,7 @@ export function createBridgeHost(options: BridgeHostOptions): BridgeHost {
           buildId,
           connection: snapshot(),
           route,
+          safeAreaInsets: routes.safeAreaInsets(),
           pageRoutes,
           ...(parsedRouteGrants?.success === true
             ? { pageRouteGrants: parsedRouteGrants.data }
@@ -244,6 +252,7 @@ export function createBridgeHost(options: BridgeHostOptions): BridgeHost {
       serving = true
       routes.readReady(message)
       back.readReady(message.accepts ?? [])
+      options.onPageOwnsSafeArea?.((message.accepts ?? []).includes(BRIDGE_SAFE_AREA_ACCEPT))
       // Every time it is asked, not once: the page re-asks on a backoff, and each ask is answered
       // with the route the shell holds now. That is the whole repair path for a frame that never
       // arrived (ruling 34) — nothing here waits on one, and nothing retries one.
@@ -326,6 +335,9 @@ export function createBridgeHost(options: BridgeHostOptions): BridgeHost {
     },
     publishRoute: (next) => {
       routes.publish(next, serving && initSent)
+    },
+    publishSafeAreaInsets: (next) => {
+      routes.publishSafeAreaInsets(next, !closed && serving && initSent)
     },
     sendBack: back.send,
     readSessionBack: back.read,

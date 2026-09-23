@@ -203,6 +203,7 @@ import {
   readBridgeHostMessage
 } from './bridge/bridge-envelope'
 import { BRIDGE_ROUTE_UPDATE_ACCEPT } from './bridge/bridge-route-update'
+import { BRIDGE_SAFE_AREA_ACCEPT } from './bridge/bridge-safe-area-insets'
 import { MobileWebShellScreen } from './MobileWebShellScreen'
 import type { MobileWebShellSessionState } from './mobile-web-shell-session-contract'
 import type { ReactTestInstance, ReactTestRenderer } from 'react-test-renderer'
@@ -818,10 +819,10 @@ describe('what one case mutates does not reach the next', () => {
     })
   })
 
-  it('shortens the view by the keyboard, which is the only side that can see one', async () => {
-    // Edge-to-edge makes the manifest's `adjustResize` inert, so the window never shrinks and the
-    // page's `visualViewport` reads full height with the IME up: it lays its live input row out
-    // under the keys. The shell owns the window, so it takes the strip off the view instead.
+  it('keeps both bar strips off the view for a page that does not pad for them', async () => {
+    // A page served from an older desktop has no reader for the insets, so the shell reserves
+    // the strips itself. Edge-to-edge makes the manifest's `adjustResize` inert, so the keyboard
+    // strip comes off the view too: the page's `visualViewport` reads full height with the IME up.
     const tree = await renderScreen(readyState('session-keyboard'))
     const root = tree.root.find((node) => node.props.testID === 'mobile-web-shell-ready')
     expect(root.props.style[1]).toEqual({ paddingTop: 44, paddingBottom: 8 })
@@ -835,6 +836,60 @@ describe('what one case mutates does not reach the next', () => {
       dependencies.keyboardListeners.get('keyboardWillHide')?.({ endCoordinates: { height: 0 } })
     })
     expect(root.props.style[1]).toEqual({ paddingTop: 44, paddingBottom: 8 })
+  })
+})
+
+/**
+ * A page that pads for the system bars itself gets the whole window, like a native screen: it
+ * paints under both bars and its SafeAreaViews pad by the insets `init` carries.
+ */
+describe('a page that owns its safe area', () => {
+  async function ownedPage(sessionId: string) {
+    dependencies.client = createFakeRpcClient()
+    const tree = await renderScreen(readyState(sessionId))
+    await act(async () => {
+      byName(tree, 'ShellViewProbe')[0]?.props.onBridgeMessage({
+        nativeEvent: {
+          json: clientFrame({
+            type: 'ready',
+            accepts: [BRIDGE_ROUTE_UPDATE_ACCEPT, BRIDGE_SAFE_AREA_ACCEPT]
+          })
+        }
+      })
+    })
+    const root = tree.root.find((node) => node.props.testID === 'mobile-web-shell-ready')
+    const initInsets = () =>
+      dependencies.posted.flatMap((json) => {
+        const read = readBridgeHostMessage(json)
+        return read.ok && read.message.type === 'init' ? [read.message.safeAreaInsets ?? null] : []
+      })
+    const keyboard = async (height: number) => {
+      await act(async () => {
+        const name = height > 0 ? 'keyboardWillShow' : 'keyboardWillHide'
+        dependencies.keyboardListeners.get(name)?.({ endCoordinates: { height } })
+      })
+    }
+    return { root, initInsets, keyboard }
+  }
+
+  it('draws the view edge-to-edge and hands the page the insets it now sits under', async () => {
+    const page = await ownedPage('session-owned')
+    expect(page.root.props.style[1]).toEqual({ paddingBottom: 0 })
+    expect(page.initInsets()).toEqual([{ top: 44, right: 0, bottom: 8, left: 0 }])
+  })
+
+  it('re-sends init with no bottom inset while the keyboard ends the view', async () => {
+    const page = await ownedPage('session-owned-keyboard')
+    await page.keyboard(336)
+    // The view ends at the keyboard's top, so nothing of it is under the gesture bar.
+    expect(page.root.props.style[1]).toEqual({ paddingBottom: 336 })
+    await page.keyboard(0)
+    expect(page.root.props.style[1]).toEqual({ paddingBottom: 0 })
+    expect(page.initInsets()).toEqual([
+      { top: 44, right: 0, bottom: 8, left: 0 },
+      { top: 44, right: 0, bottom: 0, left: 0 },
+      { top: 44, right: 0, bottom: 8, left: 0 }
+    ])
   })
 })
 

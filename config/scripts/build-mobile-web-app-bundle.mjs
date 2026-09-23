@@ -408,11 +408,11 @@ const isScriptOutput = (path) => path.endsWith('.js')
 /**
  * Every source module one page route reaches, as the builder itself resolves them.
  *
- * Both entry points are needed: `app/h/_layout.tsx` wraps every route under it, and its imports are
- * part of the page as surely as the route module's.
+ * Every layout above the route is an entry: `app/_layout` (its web sibling) and `app/h/_layout.tsx`
+ * wrap every route, and their imports are part of the page as surely as the route module's.
  */
 export async function mobileWebAppRouteClosure(routeModule) {
-  return await mobileWebAppModuleClosure(['app/h/_layout', routeModule])
+  return await mobileWebAppModuleClosure(['app/_layout', 'app/h/_layout', routeModule])
 }
 
 /**

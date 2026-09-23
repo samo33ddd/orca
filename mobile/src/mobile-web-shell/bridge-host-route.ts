@@ -3,7 +3,12 @@ import {
   type BridgeClientMessage,
   type BridgeInitRoute
 } from './bridge/bridge-envelope'
-import { readBridgeRouteUpdate } from './bridge/bridge-route-update'
+import { BRIDGE_ROUTE_UPDATE_ACCEPT, readBridgeRouteUpdate } from './bridge/bridge-route-update'
+import {
+  sameSafeAreaInsets,
+  ZERO_SAFE_AREA_INSETS,
+  type BridgeSafeAreaInsets
+} from './bridge/bridge-safe-area-insets'
 
 /** The screen one host is serving, which is the one field of `init` that moves under a live page. */
 export type BridgeHostRoute = {
@@ -27,6 +32,13 @@ export type BridgeHostRoute = {
    * as on `send`. The request that route carries is spent by the page, which erases the param.
    */
   readonly publish: (next: BridgeInitRoute, deliverable: boolean) => void
+  /** The insets the next `init` carries. */
+  readonly safeAreaInsets: () => BridgeSafeAreaInsets
+  /**
+   * Moves the held insets, and sends one `init` when they moved and the page takes one. The same
+   * lane as a pane update and the same rule: held either way, so the next `ready` carries them.
+   */
+  readonly publishSafeAreaInsets: (next: BridgeSafeAreaInsets, deliverable: boolean) => void
 }
 
 /**
@@ -51,10 +63,12 @@ export function createBridgeHostRoute(args: {
   refused: boolean
   sendInit: () => void
   onRefused: (issue: string) => void
+  safeAreaInsets?: BridgeSafeAreaInsets
 }): BridgeHostRoute {
   const parsed = BridgeInitRouteSchema.safeParse(args.opened)
   let route = parsed.success && !args.refused ? parsed.data : null
   let accepts: readonly string[] = []
+  let insets = args.safeAreaInsets ?? ZERO_SAFE_AREA_INSETS
   return {
     current: () => route,
     openIssue: () => (parsed.success ? 'unknown' : (parsed.error.issues[0]?.message ?? 'unknown')),
@@ -69,6 +83,16 @@ export function createBridgeHostRoute(args: {
       }
       route = update.route
       if (update.kind === 'send') {
+        args.sendInit()
+      }
+    },
+    safeAreaInsets: () => insets,
+    publishSafeAreaInsets: (next, deliverable) => {
+      if (sameSafeAreaInsets(insets, next)) {
+        return
+      }
+      insets = next
+      if (deliverable && accepts.includes(BRIDGE_ROUTE_UPDATE_ACCEPT)) {
         args.sendInit()
       }
     }
