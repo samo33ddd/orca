@@ -173,6 +173,25 @@ describe.each(['opencode', 'opencode2'] as const)('%s plugin OpenCode 2 lineage'
     await cleanup?.()
   })
 
+  it('retires a child raised blocker when that child goes idle', async () => {
+    const { posts, cleanup } = await runSetupBridge([
+      created(ROOT),
+      created(CHILD),
+      { type: 'session.execution.started', data: { sessionID: ROOT } },
+      { type: 'form.created', data: { form: questionForm('form-child', CHILD) } },
+      { type: 'session.execution.succeeded', data: { sessionID: CHILD } }
+    ])
+    await vi.waitFor(() => {
+      expect(posts.map((post) => post.hook_event_name)).toContain('AskUserQuestion')
+    })
+    // The root turn is still running, so the pane goes back to busy rather than staying blocked.
+    await vi.waitFor(() => {
+      expect(posts.at(-1)?.hook_event_name).toBe('SessionBusy')
+    })
+    expect(posts.at(-1)).toEqual(expect.objectContaining({ sessionID: ROOT }))
+    await cleanup?.()
+  })
+
   it('still blocks the pane on the root session own question', async () => {
     const { posts, cleanup } = await runSetupBridge([
       created(ROOT),
