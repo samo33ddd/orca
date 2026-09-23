@@ -4,12 +4,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AI_VAULT_AGENTS } from '../../shared/ai-vault-types'
 import { scanAiVaultSessions } from './session-scanner'
-import {
-  isolatedScanRoots,
-  jsonLines,
-  writeMuseScannerFixture,
-  writeJcodeSessionFixture
-} from './session-scanner-test-fixtures'
+import { isolatedScanRoots, jsonLines } from './session-scanner-test-fixtures'
 import { writeEveryAgentVault } from './session-scanner-every-agent-fixture'
 
 // Why: the SQLite worker bundle does not exist in the test runtime; route the
@@ -399,11 +394,15 @@ describe('scanAiVaultSessions', () => {
     tempRoots.push(root)
     const { roots, antigravitySessionId, ompSessionFile, primeAgentSessionFile } =
       await writeEveryAgentVault(root)
-    await writeMuseScannerFixture(roots.museSessionsDir)
 
-    await writeJcodeSessionFixture(roots)
-
-    const result = await scanAiVaultSessions({ ...roots, platform: 'darwin', limit: 20 })
+    // Why the headroom: the limit is a newest-first cap, so a limit equal to the
+    // agent count silently drops one agent as soon as any fixture writes a second
+    // session — which is how adding jcode's fixture knocked Claude out of this set.
+    const result = await scanAiVaultSessions({
+      ...roots,
+      platform: 'darwin',
+      limit: AI_VAULT_AGENTS.length * 2
+    })
 
     expect(result.issues).toEqual([])
     expect(new Set(result.sessions.map((session) => session.agent))).toEqual(
