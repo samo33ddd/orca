@@ -26,6 +26,17 @@ const WEB_SUBCOMMAND = 'web'
 /** Launcher flags that print a composed config and exit. */
 const DUMP_FLAGS = new Set(['--dump-config', '--dump-default-config', '--dump-config-schema'])
 
+/** Binaries that always boot `--profile dsh-tui` and forward the rest to the terminal app. */
+const TUI_LAUNCHER_NAMES = new Set(['dsh-tui', 'dst'])
+
+const PROGRAM_EXTENSION_RE = /\.(?:exe|cmd|bat|ps1|js|mjs|cjs)$/
+
+function programBasename(token: string | undefined): string {
+  const unquoted = token?.trim().replace(/^["']|["']$/g, '') ?? ''
+  const basename = unquoted.split(/[\\/]/).pop() ?? unquoted
+  return basename.toLowerCase().replace(PROGRAM_EXTENSION_RE, '')
+}
+
 function readProfileName(tokens: readonly string[], index: number): string | null {
   const token = tokens[index]
   if (token === undefined) {
@@ -60,6 +71,18 @@ function isLauncherToken(token: string): boolean {
  * and a prompt or session id is free text that must never be read as a launcher flag.
  */
 export function isDshNonInteractiveCommand(tokens: readonly string[]): boolean {
+  // Why first: `dsh-tui`/`dst` have already chosen the interactive profile, and everything
+  // after them is the TERMINAL APP's argv — a `--resume` id or a workspace target. A
+  // workspace folder named `web` or `plugin` is an ordinary directory name, and reading it
+  // as a `dsh` subcommand would mark a live agent pane non-interactive, costing it status
+  // hooks and prompt delivery. Index 1 as well as 0 because a node shim puts the launcher
+  // script path there.
+  if (
+    TUI_LAUNCHER_NAMES.has(programBasename(tokens[0])) ||
+    TUI_LAUNCHER_NAMES.has(programBasename(tokens[1]))
+  ) {
+    return false
+  }
   let profile: string | null = null
   let index = 1
   // Skip the leading non-flag tokens: an interpreter invocation puts the script path here.

@@ -36,6 +36,20 @@ describe('isDshNonInteractiveCommand', () => {
     // `--resume web` belongs to the terminal app, not the launcher.
     expect(isDshNonInteractiveCommand(tokens('dsh --profile dsh-tui --resume web'))).toBe(false)
   })
+
+  it.each([
+    'dsh-tui web',
+    'dst web',
+    'dsh-tui plugin',
+    'dsh-tui --continue web',
+    'dsh-tui /home/dev/projects/web',
+    'node /usr/local/lib/node_modules/.bin/dsh-tui web',
+    'C:\\Users\\dev\\AppData\\npm\\dsh-tui.cmd web'
+  ])('keeps %s interactive: the launcher already chose the TUI profile', (commandLine) => {
+    // Everything after `dsh-tui`/`dst` is the terminal app's argv — a workspace target or a
+    // resume id — so a folder named `web` or `plugin` is a directory name, not a subcommand.
+    expect(isDshNonInteractiveCommand(tokens(commandLine))).toBe(false)
+  })
 })
 
 describe('dsh foreground process recognition', () => {
@@ -57,6 +71,13 @@ describe('dsh foreground process recognition', () => {
   ])('does not claim %s as an interactive agent pane', (commandLine) => {
     expect(recognizeAgentProcessFromCommandLine(commandLine)).toBeNull()
   })
+
+  it.each(['dsh-tui web', 'dst plugin'])(
+    'still recognizes %s as the dsh agent pane',
+    (commandLine) => {
+      expect(recognizeAgentProcessFromCommandLine(commandLine)?.agent).toBe('dsh')
+    }
+  )
 
   it('still reports non-interactive dsh when headless one-shots are included', () => {
     // Non-interactivity guards ask for the wider set: a `dsh web` pane is not a shell

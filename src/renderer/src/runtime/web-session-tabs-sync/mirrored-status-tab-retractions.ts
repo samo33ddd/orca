@@ -36,8 +36,7 @@ export function collectUnhydratedMirroredTabRetractions(args: {
     if (
       entry?.worktreeId === args.worktreeId &&
       (entry.connectionId === args.environmentId ||
-        (args.environmentId === 'local' &&
-          (entry.connectionId === null || entry.connectionId === undefined))) &&
+        (args.environmentId === 'local' && (entry.connectionId === null || entry.connectionId === undefined))) &&
       tabId &&
       candidates.has(tabId)
     ) {

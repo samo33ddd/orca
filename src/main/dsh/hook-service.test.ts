@@ -6,18 +6,23 @@ import { DshHookService } from './hook-service'
 import { DSH_HOOK_EVENTS } from './hook-settings'
 
 // Why: getSharedManagedScriptPath() writes under homedir()/.orca and the patch layer
-// resolves via DSH_HOME ?? ~/.dsh. Point HOME at a temp dir and clear DSH_HOME so
+// resolves via DSH_HOME ?? ~/.dsh. Point the home env at a temp dir and clear DSH_HOME so
 // install/remove never touches the real ~/.orca or a developer's own DSH home.
-// os.homedir() resolves $HOME on POSIX.
+// Why both names: os.homedir() reads $HOME on POSIX and %USERPROFILE% on Windows, and this
+// file asserts the Windows script name too — setting only HOME would let a Windows run edit
+// the developer's real home.
 let home: string
 let originalHome: string | undefined
+let originalUserProfile: string | undefined
 let originalDshHome: string | undefined
 
 beforeEach(() => {
   home = mkdtempSync(join(tmpdir(), 'orca-dsh-hook-'))
   originalHome = process.env.HOME
+  originalUserProfile = process.env.USERPROFILE
   originalDshHome = process.env.DSH_HOME
   process.env.HOME = home
+  process.env.USERPROFILE = home
   delete process.env.DSH_HOME
 })
 
@@ -26,6 +31,11 @@ afterEach(() => {
     delete process.env.HOME
   } else {
     process.env.HOME = originalHome
+  }
+  if (originalUserProfile === undefined) {
+    delete process.env.USERPROFILE
+  } else {
+    process.env.USERPROFILE = originalUserProfile
   }
   if (originalDshHome === undefined) {
     delete process.env.DSH_HOME

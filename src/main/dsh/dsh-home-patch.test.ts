@@ -82,10 +82,31 @@ describe('removeManagedDshPatch', () => {
 })
 
 describe('findManagedDshPatchRegion', () => {
+  const ORPHAN_START = '# >>> orca-managed-dsh-hooks (managed by Orca; do not edit) >>>'
+
   it('fails closed on a truncated region rather than guessing its extent', () => {
     // Splicing a guessed end marker would delete the user rows that follow.
-    const truncated = `# >>> orca-managed-dsh-hooks (managed by Orca; do not edit) >>>\n${USER_ROWS}`
+    const truncated = `${ORPHAN_START}\n${USER_ROWS}`
     expect(findManagedDshPatchRegion(truncated)).toBeNull()
     expect(removeManagedDshPatch(truncated).changed).toBe(false)
+  })
+
+  it('never pairs an orphan start with a later block\u2019s end', () => {
+    // The data-loss shape: an interrupted write leaves an orphan start above the user's
+    // rows, and the next install appends a complete block below them. Pairing the orphan
+    // with the new end marker would make the region cover the user's rows, so install
+    // (rewrite) and remove (strip) would both delete them.
+    const truncated = `${ORPHAN_START}\n${USER_ROWS}`
+    const installed = applyManagedDshPatch(truncated, HOOKS_PATH)
+    expect(installed).toContain('apiKeyEnv')
+
+    const region = findManagedDshPatchRegion(installed)
+    expect(region).not.toBeNull()
+    const covered = installed.split('\n').slice(region?.startLine ?? 0, (region?.endLine ?? 0) + 1)
+    expect(covered.join('\n')).not.toContain('apiKeyEnv')
+
+    // Both mutating paths must leave the user's rows intact, twice over.
+    expect(applyManagedDshPatch(installed, HOOKS_PATH)).toContain('apiKeyEnv')
+    expect(removeManagedDshPatch(installed).text).toContain('apiKeyEnv')
   })
 })

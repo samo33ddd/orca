@@ -85,7 +85,11 @@ export class OrcaRuntimeWithWriteTerminalAgentPrompt extends OrcaRuntimeWithReso
     } else {
       const agent = this.getPtyAgent(ptyId)
       const submitDelayMs = options.promptForSchedule
-        ? resolveAgentPromptSubmitDelayForAgent(writeHostPlatform, options.promptForSchedule, agent)
+        ? resolveAgentPromptSubmitDelayForAgent(
+            writeHostPlatform,
+            options.promptForSchedule,
+            agent
+          )
         : getAgentPromptSubmitDelayMs(writeHostPlatform, pasteByteLength)
       await waitForAgentPromptDelay(submitDelayMs, options.signal)
     }

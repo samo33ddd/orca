@@ -30,16 +30,22 @@ function splitLines(text: string): string[] {
 
 /** Locate the managed region, or null when the file carries none. */
 export function findManagedDshPatchRegion(text: string): ManagedDshPatchRegion | null {
-  const lines = splitLines(text)
-  const startLine = lines.findIndex((line) => line.trim() === START_MARKER)
-  if (startLine === -1) {
-    return null
+  // Why the NEAREST preceding start, not the first one: an interrupted write can leave an
+  // orphan start marker with no end. Pairing that orphan with a LATER block's end marker
+  // makes the region swallow every row in between — so the next install (which rewrites the
+  // region) or remove (which strips it) would delete the user's own rows. Walking forward
+  // and resetting the candidate on each start keeps an orphan un-paired, which leaves it as
+  // an inert comment line rather than a deletion range.
+  let startLine = -1
+  for (const [index, line] of splitLines(text).entries()) {
+    const trimmed = line.trim()
+    if (trimmed === START_MARKER) {
+      startLine = index
+    } else if (trimmed === END_MARKER && startLine !== -1) {
+      return { startLine, endLine: index }
+    }
   }
-  const endOffset = lines.slice(startLine + 1).findIndex((line) => line.trim() === END_MARKER)
-  // Why: a truncated region (start with no end) is unknown extent. Splicing a guess would
-  // delete user rows, so fail closed and report it as absent — install then appends a
-  // fresh region and status reports the duplicate rather than silently eating content.
-  return endOffset === -1 ? null : { startLine, endLine: startLine + 1 + endOffset }
+  return null
 }
 
 function buildManagedBlock(managedHooksPath: string): string[] {

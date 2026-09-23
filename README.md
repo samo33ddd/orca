@@ -206,7 +206,6 @@ Works with **any CLI agent** — if it runs in a terminal, it runs in Orca.
   <a href="https://github.com/QwenLM/qwen-code"><kbd><img src="https://www.google.com/s2/favicons?domain=qwenlm.github.io&sz=64" alt="Qwen Code logo" width="16" valign="middle" /> Qwen Code</kbd></a> &nbsp;
   <a href="https://support.atlassian.com/rovo/docs/install-and-run-rovo-dev-cli-on-your-device/"><kbd><img src="https://www.google.com/s2/favicons?domain=atlassian.com&sz=64" alt="Rovo Dev logo" width="16" valign="middle" /> Rovo Dev</kbd></a> &nbsp;
   <a href="https://dev.meta.ai/docs/muse-code"><kbd><img src="https://www.google.com/s2/favicons?domain=dev.meta.ai&sz=64" alt="Muse logo" width="16" valign="middle" /> Muse</kbd></a> &nbsp;
-  <a href="https://deepseek-harness.github.io/deepseek-harness/"><kbd><img src="https://www.google.com/s2/favicons?domain=deepseek.com&amp;sz=64" alt="DeepSeek Harness logo" width="16" valign="middle" /> DeepSeek Harness</kbd></a> &nbsp;
   <kbd>+ any CLI agent</kbd>
 </p>
 

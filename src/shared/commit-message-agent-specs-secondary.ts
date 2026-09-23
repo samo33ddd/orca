@@ -141,11 +141,15 @@ export function buildSecondaryCommitMessageAgentSpecs({
       id: 'dsh',
       label: 'DeepSeek Harness',
       binary: 'dsh',
-      // Why: `dsh --profile headless "<task>"` runs one fresh persisted session, prints the
-      // final answer and exits — the documented one-shot entry mode. The interactive
-      // `dsh-tui` profile is deliberately not used here; Source Control AI stays one-shot.
-      promptDelivery: 'argv',
-      buildArgs: ({ prompt }) => ['--profile', 'headless', prompt],
+      // Why: `dsh --profile headless` runs one fresh persisted session, prints the final
+      // answer and exits — the documented one-shot entry mode. The interactive `dsh-tui`
+      // profile is deliberately not used here; Source Control AI stays one-shot.
+      // Why stdin and not argv: the prompt carries the whole diff. On argv it would sit in
+      // the process table for every user on the box, and it would eventually hit the argv
+      // limit. `-` is DSH's explicit stdin marker; measured against 0.1.5-rc.1, omitting the
+      // positional entirely is rejected ("a task is required") even when stdin is a pipe.
+      promptDelivery: 'stdin',
+      buildArgs: () => ['--profile', 'headless', '-'],
       // Why: the launcher owns `--profile`; a second one would boot a different profile.
       singletonOptions: [['--profile']],
       modelSource: 'static',
