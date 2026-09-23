@@ -10,7 +10,17 @@ const NON_SESSION_FORM_OWNERS = new Set(["global"]);
 
 async function setupOpenCode2Status(ctx) {
   const controller = new AbortController();
-  const client = { session: { get: (input, options) => ctx.session.get(input, options) } };
+  // Why: OpenCode 2 resolves session.get to the session record itself and ships no
+  // session.list, while the shared lineage walk reads the generated SDK's { data }
+  // envelope; re-wrap here so parentID ancestry resolves instead of failing open.
+  const client = {
+    session: {
+      get: async (input, options) => {
+        const result = await ctx.session.get(input, options);
+        return result && typeof result.id === "string" ? { data: result } : result;
+      },
+    },
+  };
   const hooks = await OrcaOpenCodeStatusPlugin({ client });
   if (!hooks.event) return async () => {};
   const promptRegistration = await ctx.session.hook("prompt", async (properties) => {
