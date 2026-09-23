@@ -103,6 +103,10 @@ export async function fetchOpenCodeGoUsageWithApiKey(
   }
   const windows = parseOpenCodeGoUsageApiPayload(body)
   if (!windows) {
+    // Why: Electron follows redirects, so a key bounced to console sign-in arrives as a 200 page.
+    if (response.headers.get('content-type')?.includes('text/html')) {
+      return { kind: 'unauthorized' }
+    }
     return { kind: 'failed', message: 'Could not parse OpenCode Go usage response' }
   }
   return { kind: 'ok', windows }

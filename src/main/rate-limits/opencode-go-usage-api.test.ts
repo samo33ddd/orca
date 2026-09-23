@@ -121,6 +121,17 @@ describe('fetchOpenCodeGoUsageWithApiKey', () => {
     })
   })
 
+  it('reports a sign-in page reached through a redirect as unauthorized', async () => {
+    netFetchMock.mockResolvedValue(
+      new Response('<!doctype html><title>Log in</title>', {
+        status: 200,
+        headers: { 'content-type': 'text/html; charset=utf-8' }
+      })
+    )
+
+    await expect(fetchOpenCodeGoUsageWithApiKey(API_KEY)).resolves.toEqual({ kind: 'unauthorized' })
+  })
+
   it('reports a malformed success body as a parse failure', async () => {
     netFetchMock.mockResolvedValue(makeResponse('{"usage":{"rolling":{}}}'))
 
