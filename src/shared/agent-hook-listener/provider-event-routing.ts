@@ -36,8 +36,8 @@ export function isNewTurnEvent(source: AgentHookSource, eventName: unknown): boo
       // Muse uses Claude-compatible lifecycle events.
       return eventName === 'UserPromptSubmit'
     case 'zcode':
-      // Why: ZCode's SessionStart lands an idle boundary row, and its own `compact` source is
-      // filtered upstream, so UserPromptSubmit is the only real new-turn boundary left.
+      // Why: matches Codex/Claude — SessionStart lands an idle boundary row and drops stale
+      // tool/prompt caches, while UserPromptSubmit is the actual turn boundary.
       return eventName === 'SessionStart' || eventName === 'UserPromptSubmit'
     case 'codex':
       return eventName === 'SessionStart' || eventName === 'UserPromptSubmit'

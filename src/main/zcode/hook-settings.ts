@@ -152,9 +152,13 @@ export function removeZCodeManagedHooks(
     }
     const definitions = readEventDefinitions(nextEvents, eventName)
     const cleaned = removeManagedCommands(definitions, isManagedCommand)
-    if (JSON.stringify(cleaned) !== JSON.stringify(definitions)) {
-      changed = true
+    // Why: only touch an event Orca actually owned something in. Without this, an unrelated
+    // empty entry the user wrote (`"Notification": []`) was deleted as collateral whenever a
+    // managed hook elsewhere made the write happen.
+    if (JSON.stringify(cleaned) === JSON.stringify(definitions)) {
+      continue
     }
+    changed = true
     if (cleaned.length === 0) {
       delete nextEvents[eventName]
     } else {

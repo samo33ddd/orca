@@ -126,6 +126,24 @@ describe('ZCodeHookService', () => {
     expect(zcodeHookService.getStatus().managedHooksPresent).toBe(false)
   })
 
+  it('leaves an unrelated empty event key alone while removing its own', () => {
+    const configPath = getZCodeConfigPath()
+    mkdirSync(join(hoisted.home, '.zcode', 'cli'), { recursive: true })
+    // Why: `Notification` is not an event Orca manages, and an empty list is a legitimate
+    // thing for a user to have written. Removing Orca's hooks must not take it with them.
+    writeFileSync(
+      configPath,
+      JSON.stringify({ hooks: { enabled: true, events: { Notification: [] } } })
+    )
+    zcodeHookService.install()
+    zcodeHookService.remove()
+    const config = readConfig()
+    expect(config.hooks?.events?.Notification).toEqual([])
+    for (const event of ZCODE_HOOK_EVENTS) {
+      expect(config.hooks?.events?.[event]).toBeUndefined()
+    }
+  })
+
   it('reports partial when the managed events are present but hooks are disabled', () => {
     zcodeHookService.install()
     const configPath = getZCodeConfigPath()
