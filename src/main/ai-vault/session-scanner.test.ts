@@ -7,7 +7,8 @@ import { scanAiVaultSessions } from './session-scanner'
 import {
   isolatedScanRoots,
   jsonLines,
-  writeMuseScannerFixture
+  writeMuseScannerFixture,
+  writeJcodeSessionFixture
 } from './session-scanner-test-fixtures'
 import { writeEveryAgentVault } from './session-scanner-every-agent-fixture'
 
@@ -400,13 +401,14 @@ describe('scanAiVaultSessions', () => {
       await writeEveryAgentVault(root)
     await writeMuseScannerFixture(roots.museSessionsDir)
 
+    await writeJcodeSessionFixture(roots)
+
     const result = await scanAiVaultSessions({ ...roots, platform: 'darwin', limit: 20 })
 
     expect(result.issues).toEqual([])
     expect(new Set(result.sessions.map((session) => session.agent))).toEqual(
       new Set(AI_VAULT_AGENTS)
     )
-
     const commandByAgent = new Map(
       result.sessions.map((session) => [session.agent, session.resumeCommand])
     )
@@ -451,6 +453,9 @@ describe('scanAiVaultSessions', () => {
     expect(commandByAgent.get('muse')).toBe("cd '/tmp/muse' && muse resume 'muse-session'")
     expect(commandByAgent.get('kimi')).toBe(
       "cd '/tmp/kimi' && kimi --session 'session_kimi-session'"
+    )
+    expect(commandByAgent.get('jcode')).toBe(
+      "cd '/tmp/jcode' && jcode --resume 'session_jcode-session'"
     )
 
     const ompSession = result.sessions.find((session) => session.agent === 'omp')

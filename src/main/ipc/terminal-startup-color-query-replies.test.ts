@@ -25,3 +25,17 @@ it('preserves color-only startup on renderers without Kitty support', () => {
     getStartupTerminalIngressIntent({ launchAgent: 'omp', terminalColorQueryReplies: colors })
   ).toEqual({ colors, deadlineMs: 5000 })
 })
+
+it('does not answer jcode startup color queries but keeps keyboard support', () => {
+  const colors = { foreground: '#ffffff', background: '#282c34' }
+  expect(
+    getStartupTerminalIngressIntent({
+      launchAgent: 'jcode',
+      terminalColorQueryReplies: colors,
+      terminalKittyKeyboardProtocol: true
+    })
+  ).toEqual({ colors: {}, kittyKeyboardProtocol: true, deadlineMs: 5000 })
+  expect(
+    getStartupTerminalIngressIntent({ launchAgent: 'jcode', terminalColorQueryReplies: colors })
+  ).toBeUndefined()
+})
