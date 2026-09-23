@@ -94,8 +94,8 @@ describe('PRB-0219 worker-release reap FIX (functional verification)', () => {
     // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: This test fixture is deliberately shaped to exercise the private/runtime boundary.
     // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: Test fixture crosses a private/runtime boundary with a verified shape.
     // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: Test fixture crosses a private/runtime boundary with a verified shape.
-    ;// oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: Test fixture crosses a private/runtime boundary with a verified shape.
-    (
+    // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: Test fixture crosses a private/runtime boundary with a verified shape.
+    ;(
       runtime as unknown as {
         inspectTerminalProcessIncarnationLiveness: (
           incarnation: string
@@ -118,8 +118,8 @@ describe('PRB-0219 worker-release reap FIX (functional verification)', () => {
     // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: This test fixture is deliberately shaped to exercise the private/runtime boundary.
     // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: Test fixture crosses a private/runtime boundary with a verified shape.
     // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: Test fixture crosses a private/runtime boundary with a verified shape.
-    ;// oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: Test fixture crosses a private/runtime boundary with a verified shape.
-    (
+    // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: Test fixture crosses a private/runtime boundary with a verified shape.
+    ;(
       runtime as unknown as {
         resolveTerminalHandleByProcessIncarnation: (
           incarnation: string,
