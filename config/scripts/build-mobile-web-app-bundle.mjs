@@ -426,7 +426,7 @@ export async function mobileWebAppRouteClosure(routeModule) {
  * first with a pin of its own — has a closure to certify and no route to name it by. Pass it alone
  * to read what it reaches on its own, or beside `app/h/_layout` to read what it adds to a page.
  *
- * `splitting: false` and a per-name output are required for a multi-entry build; with the defaults
+ * `splitting: false` and a per-path output are required for a multi-entry build; with the defaults
  * esbuild fails on two outputs claiming `dist/entry.js`.
  *
  * Note for anyone comparing this with a parity pin: `c1-page-closure.ts`, and the closures C2.6,
@@ -445,7 +445,8 @@ export async function mobileWebAppModuleClosure(entryModules, { absWorkingDir } 
     // the native switch no browser ever loads.
     entryPoints: entryModules.map((entry) => entry.replace(/\.tsx?$/, '')),
     splitting: false,
-    entryNames: '[name]',
+    // `[dir]` too: `app/_layout` and `app/h/_layout` share a name.
+    entryNames: '[dir]/[name]',
     plugins: base.plugins.filter((plugin) => plugin.name !== ROUTE_MANIFEST_PLUGIN_NAME),
     write: false,
     metafile: true,
