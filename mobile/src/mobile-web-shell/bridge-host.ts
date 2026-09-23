@@ -19,10 +19,7 @@ import { createBridgeHostFrames } from './bridge-host-frames'
 import { createBridgeHostBack, type BridgeSessionBack } from './bridge-host-back'
 import { createBridgeNotifyForwarder } from './bridge-host-notify'
 import { createBridgeHostRoute } from './bridge-host-route'
-import {
-  BRIDGE_SAFE_AREA_ACCEPT,
-  type BridgeSafeAreaInsets
-} from './bridge/bridge-safe-area-insets'
+import type { BridgeSafeAreaInsets } from './bridge/bridge-safe-area-insets'
 import type { BridgeHostOptions } from './bridge-host-contract'
 
 // Re-exported so a caller reaches the host and what it reports through one module.
@@ -212,11 +209,13 @@ export function createBridgeHost(options: BridgeHostOptions): BridgeHost {
     report: (diagnostic) => options.onDiagnostic?.(diagnostic)
   })
 
+  // The same three the outbound frames are gated on, read here as well: the Back caller spends the
+  // answer on a hardware key, and a `true` for a frame that never left is a dead press.
+  const deliverable = (): boolean => !closed && serving && initSent
+
   const back = createBridgeHostBack({
     send,
-    // The same three the outbound frames are gated on, read here as well: the caller spends the
-    // answer on a hardware key, and a `true` for a frame that never left is a dead press.
-    deliverable: () => !closed && serving && initSent,
+    deliverable,
     onClaim: (claimed) => options.onPageBackClaim(claimed),
     ...(options.sessionBack === undefined ? {} : { established: options.sessionBack })
   })
@@ -252,7 +251,6 @@ export function createBridgeHost(options: BridgeHostOptions): BridgeHost {
       serving = true
       routes.readReady(message)
       back.readReady(message.accepts ?? [])
-      options.onPageOwnsSafeArea?.((message.accepts ?? []).includes(BRIDGE_SAFE_AREA_ACCEPT))
       // Every time it is asked, not once: the page re-asks on a backoff, and each ask is answered
       // with the route the shell holds now. That is the whole repair path for a frame that never
       // arrived (ruling 34) — nothing here waits on one, and nothing retries one.
@@ -260,7 +258,7 @@ export function createBridgeHost(options: BridgeHostOptions): BridgeHost {
       // Forwarded verbatim, including a name this shell has never implemented: what each report
       // means is the caller's, and this host's job is that the list belongs to the document that
       // just spoke rather than to the one before it.
-      options.onPageReady(message.reports ?? [])
+      options.onPageReady({ reports: message.reports ?? [], accepts: message.accepts ?? [] })
       return
     }
     if (!serving) {
@@ -337,7 +335,7 @@ export function createBridgeHost(options: BridgeHostOptions): BridgeHost {
       routes.publish(next, serving && initSent)
     },
     publishSafeAreaInsets: (next) => {
-      routes.publishSafeAreaInsets(next, !closed && serving && initSent)
+      routes.publishSafeAreaInsets(next, deliverable())
     },
     sendBack: back.send,
     readSessionBack: back.read,

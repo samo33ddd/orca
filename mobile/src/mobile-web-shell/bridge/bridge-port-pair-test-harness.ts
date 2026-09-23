@@ -254,7 +254,7 @@ export function createBridgePortPair<TRpc extends RpcClient>(
     }),
     onStorageWrite: (key, value) => storageWrites.push({ key, value }),
     onPageFault: (error) => pageFaults.push(error),
-    onPageReady: (reports) => {
+    onPageReady: ({ reports }) => {
       pageReadies += 1
       pageReports.push(reports)
     },

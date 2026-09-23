@@ -428,13 +428,12 @@ const MERMAID_PACKAGE = 'node_modules/mermaid/'
  *
  * The page then took over its own safe area: the bridge client reaches
  * `bridge/bridge-safe-area-insets.ts`, and the closure gained the page's root layout
- * (`app/_layout.web.tsx`) with `page-safe-area-provider.tsx`, since that layout wraps every route.
- * Three local modules, measured.
+ * (`app/_layout.web.tsx`), which wraps every route. Two local modules, measured.
  *
- *   modules        4216 -> 4219   (+3)
- *   local modules  1030 -> 1033   (+3)
+ *   modules        4216 -> 4218   (+2)
+ *   local modules  1030 -> 1032   (+2)
  */
-const SESSION_ROUTE_MODULES = 4219
+const SESSION_ROUTE_MODULES = 4218
 
 /** What the page enters this route through once the route is a switch with a `.web.tsx` sibling. */
 const ROUTE_ENTRY = [

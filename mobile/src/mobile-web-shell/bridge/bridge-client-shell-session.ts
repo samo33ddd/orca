@@ -1,6 +1,10 @@
 import { readShellSession, type BridgeShellSession } from './bridge-client-session'
 import { bridgeRouteMoved } from './bridge-route-update'
-import { sameSafeAreaInsets, type BridgeSafeAreaInsets } from './bridge-safe-area-insets'
+import {
+  sameSafeAreaInsets,
+  ZERO_SAFE_AREA_INSETS,
+  type BridgeSafeAreaInsets
+} from './bridge-safe-area-insets'
 import type {
   BridgeConnectionSnapshot,
   BridgeHostMessage,
@@ -42,16 +46,6 @@ export function createBridgeClientShellSession(args: {
   const routeUpdateListeners = new Set<(route: BridgeInitRoute | null) => void>()
   const insetsListeners = new Set<(insets: BridgeSafeAreaInsets) => void>()
 
-  /** Whether `next` moved the insets `held` had. Keeps the held object when nothing moved, so a
-   *  reader keyed on identity does not re-render for a re-asked `ready`. */
-  function insetsMoved(held: BridgeShellSession | null, next: BridgeShellSession): boolean {
-    if (held !== null && sameSafeAreaInsets(held.safeAreaInsets, next.safeAreaInsets)) {
-      next.safeAreaInsets = held.safeAreaInsets
-      return false
-    }
-    return held !== null
-  }
-
   return {
     current: () => session,
     accept: (message) => {
@@ -63,16 +57,15 @@ export function createBridgeClientShellSession(args: {
       // Updated in place for the session the page already holds, rebuilt for a different one. The
       // identity of what survives is the assertion: same object, so the storage snapshot the page
       // booted from is the one it keeps.
-      const next =
+      const sent = message.safeAreaInsets ?? ZERO_SAFE_AREA_INSETS
+      const movedInsets = held !== null && !sameSafeAreaInsets(held.safeAreaInsets, sent)
+      // The held object when the values match, so a reader keyed on identity does not re-render
+      // for a re-asked `ready`.
+      const safeAreaInsets = held === null || movedInsets ? sent : held.safeAreaInsets
+      session =
         update === null
-          ? readShellSession(message)
-          : {
-              ...update,
-              route: message.route ?? null,
-              safeAreaInsets: readShellSession(message).safeAreaInsets
-            }
-      const movedInsets = insetsMoved(held, next)
-      session = next
+          ? { ...readShellSession(message), safeAreaInsets }
+          : { ...update, route: message.route ?? null, safeAreaInsets }
       // Re-primed either way, because a second `init` is also how the page recovers a cache it has
       // refused a `state` frame into: the shell rebuilt under it publishes a generation the page's
       // own is newer than, and this frame is what puts the two back in step. A pane update carries
@@ -84,7 +77,7 @@ export function createBridgeClientShellSession(args: {
       readyListeners.clear()
       if (movedInsets) {
         for (const listener of insetsListeners) {
-          listener(next.safeAreaInsets)
+          listener(safeAreaInsets)
         }
       }
       // Only a route that moved is an update. The shell answers every `ready` with the route it

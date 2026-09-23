@@ -5,6 +5,7 @@ import type { BridgeRefusal } from './bridge/bridge-caps'
 import type { BridgeInitHost, BridgeInitRoute } from './bridge/bridge-envelope'
 import type { BridgeClearableRouteParam } from './bridge/bridge-route-update'
 import type { BridgeSafeAreaInsets } from './bridge/bridge-safe-area-insets'
+import type { PageReadyDeclaration } from './mobile-web-shell-session-contract'
 import type { BridgeHapticsKind } from './bridge/bridge-haptics-notify'
 import type { BridgeErrorCapture } from './bridge/bridge-error-capture'
 import type { BridgeNativeVerb } from './bridge/bridge-native-verbs'
@@ -132,9 +133,6 @@ export type BridgeHostOptions = {
   /** How much of the WebView sits under a system bar when it is drawn edge-to-edge. Zeros when
    *  absent; moved later with `publishSafeAreaInsets`. */
   safeAreaInsets?: BridgeSafeAreaInsets
-  /** Whether the document that just said `ready` pads for the system bars itself
-   *  (`BRIDGE_SAFE_AREA_ACCEPT`). Reported on every `ready`, so a reload re-states it. */
-  onPageOwnsSafeArea?: (owns: boolean) => void
   /**
    * This device's identity to that host, as the native screens already send it, swapped in for the
    * page's placeholder on the way out. Read at forward time rather than captured: the host outlives
@@ -204,7 +202,7 @@ export type BridgeHostOptions = {
    * the same reason as the fault: the shell bounds the wait for it, and a host built without this
    * would leave a document that never spoke looking exactly like one still starting up.
    */
-  onPageReady: (reports: readonly string[]) => void
+  onPageReady: (ready: PageReadyDeclaration) => void
   /**
    * The page has a frame on screen. Only pages whose `ready` listed `BRIDGE_PAGE_PAINTED` post it,
    * which is why `onPageReady` carries that list: a caller covering the view until this arrives

@@ -3,8 +3,9 @@ import {
   type BridgeClientMessage,
   type BridgeInitRoute
 } from './bridge/bridge-envelope'
-import { BRIDGE_ROUTE_UPDATE_ACCEPT, readBridgeRouteUpdate } from './bridge/bridge-route-update'
+import { readBridgeRouteUpdate } from './bridge/bridge-route-update'
 import {
+  BRIDGE_SAFE_AREA_ACCEPT,
   sameSafeAreaInsets,
   ZERO_SAFE_AREA_INSETS,
   type BridgeSafeAreaInsets
@@ -35,8 +36,8 @@ export type BridgeHostRoute = {
   /** The insets the next `init` carries. */
   readonly safeAreaInsets: () => BridgeSafeAreaInsets
   /**
-   * Moves the held insets, and sends one `init` when they moved and the page takes one. The same
-   * lane as a pane update and the same rule: held either way, so the next `ready` carries them.
+   * Moves the held insets, and sends one `init` when they moved and the page reads them. The same
+   * lane as a pane update: held either way, so the next `ready` carries them.
    */
   readonly publishSafeAreaInsets: (next: BridgeSafeAreaInsets, deliverable: boolean) => void
 }
@@ -92,7 +93,8 @@ export function createBridgeHostRoute(args: {
         return
       }
       insets = next
-      if (deliverable && accepts.includes(BRIDGE_ROUTE_UPDATE_ACCEPT)) {
+      // Only to a page that reads them: a re-init to one that does not is a wasted frame per move.
+      if (deliverable && accepts.includes(BRIDGE_SAFE_AREA_ACCEPT)) {
         args.sendInit()
       }
     }

@@ -207,17 +207,14 @@ export function MobileWebShellScreen({
     reportPageBackClaim,
     pageReady,
     pageFrame,
-    backClaimed
+    backClaimed,
+    pageOwnsSafeArea
   } = useMobileWebShellSession({ hostId, routePathname: route.pathname, runtime })
   // Which mount the notice was dismissed on, not whether it was: a later refusal opens its own
   // generation under a new session id, so it is not silenced by a tap on the one before it.
   const [noticeDismissedFor, setNoticeDismissedFor] = useState<string | null>(null)
-  // Per session for the reason the notice is: a remount is a new document that has not said yet.
-  const [safeAreaOwnedBy, setSafeAreaOwnedBy] = useState<string | null>(null)
-  const readySessionId = state.kind === 'ready' ? state.sessionId : null
-  // Edge-to-edge only for a page that pads for the bars itself; an older page keeps the strips.
-  const pageOwnsSafeArea = readySessionId !== null && safeAreaOwnedBy === readySessionId
-  const noticeShown = updateNotice !== null && noticeDismissedFor !== readySessionId
+  const noticeShown =
+    updateNotice !== null && state.kind === 'ready' && noticeDismissedFor !== state.sessionId
   const pageInsets = pageSafeAreaInsets({
     insets,
     keyboardInset,
@@ -245,9 +242,6 @@ export function MobileWebShellScreen({
     hostId,
     route,
     safeAreaInsets: pageInsets,
-    onPageOwnsSafeArea: (owns) => {
-      setSafeAreaOwnedBy(owns ? readySessionId : null)
-    },
     pageRoutes,
     pageRouteGrants,
     routeGrants,
@@ -270,8 +264,8 @@ export function MobileWebShellScreen({
     // the map as they are made. This re-seats that map on the store afterwards, for the key whose
     // write never persisted, and it runs on every ask because a document that reloads inside this
     // mount asks again.
-    onPageReady: (reports) => {
-      reportPageReady(reports)
+    onPageReady: (ready) => {
+      reportPageReady(ready)
       void refreshStorage()
     },
     // The one thing that says the page is something to look at. The cover below stays up until it
@@ -378,10 +372,11 @@ export function MobileWebShellScreen({
     <View
       style={[
         styles.shellRoot,
-        // Edge-to-edge like a native screen: the page paints under the bars and pads through its
-        // own SafeAreaViews. Only the keyboard strip stays off the view, since the page cannot see it.
+        // Edge-to-edge like a native screen, for a page that pads for the bars itself; an older page
+        // keeps the strips. The keyboard strip stays off either way, since the page cannot see it,
+        // and the banner takes the status bar strip when it shows.
         pageOwnsSafeArea
-          ? { paddingBottom: keyboardInset }
+          ? { paddingTop: noticeShown ? insets.top : 0, paddingBottom: keyboardInset }
           : { paddingTop: insets.top, paddingBottom: Math.max(insets.bottom, keyboardInset) }
       ]}
       testID="mobile-web-shell-ready"
@@ -389,13 +384,11 @@ export function MobileWebShellScreen({
       {/* Above the page and dismissible, never in front of it: the workspace below this line
           works, and the only thing that did not happen is the update to a newer one. */}
       {updateNotice !== null && noticeShown && (
-        <View style={{ paddingTop: pageOwnsSafeArea ? insets.top : 0 }}>
-          <HostRouteNoticeBanner
-            message={updateNoticeMessage(updateNotice)}
-            tone="failure"
-            onDismiss={() => setNoticeDismissedFor(state.sessionId)}
-          />
-        </View>
+        <HostRouteNoticeBanner
+          message={updateNoticeMessage(updateNotice)}
+          tone="failure"
+          onDismiss={() => setNoticeDismissedFor(state.sessionId)}
+        />
       )}
       <OrcaMobileWebShellView
         key={state.sessionId}

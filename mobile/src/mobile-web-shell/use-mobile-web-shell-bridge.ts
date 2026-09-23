@@ -14,7 +14,10 @@ import type { BridgeSessionBack } from './bridge-host-back'
 import type { BridgeNavigateBackOutcome } from './bridge-host-contract'
 import type { BridgeNativeVerb } from './bridge/bridge-native-verbs'
 import type { BridgeErrorCapture } from './bridge/bridge-error-capture'
-import type { MobileWebShellSessionState } from './mobile-web-shell-session-contract'
+import type {
+  MobileWebShellSessionState,
+  PageReadyDeclaration
+} from './mobile-web-shell-session-contract'
 import type { PageHostSnapshot } from './use-page-host-snapshot'
 import type { PageStorageForInit } from './page-storage-keys'
 
@@ -83,8 +86,6 @@ export type MobileWebShellBridgeArgs = {
   route: BridgeInitRoute
   /** What the first `init` of a new host carries; later moves go through `publishSafeAreaInsets`. */
   safeAreaInsets: BridgeSafeAreaInsets
-  /** Whether the document that said `ready` pads for the system bars itself. */
-  onPageOwnsSafeArea: (owns: boolean) => void
   /** The route patterns the page keeps for itself; everything else comes back as `navigate`. */
   pageRoutes: readonly string[]
   pageRouteGrants: readonly { pathname: string; grants: readonly string[] }[]
@@ -114,7 +115,7 @@ export type MobileWebShellBridgeArgs = {
   onPageFault: (error: BridgeErrorCapture) => void
   /** The page asked for a session, and what it declared it reports. Reported so the screen can
    *  stop waiting for it, and so it knows whether a paint report is coming. */
-  onPageReady: (reports: readonly string[]) => void
+  onPageReady: (ready: PageReadyDeclaration) => void
   /** The page has a frame on screen, from a page that said it would report one. */
   onPagePainted: () => void
   /** The page is holding the device Back key, or has let it go. False arrives on its own for
@@ -194,7 +195,6 @@ export function useMobileWebShellBridge(args: MobileWebShellBridgeArgs): MobileW
       sessionId,
       route: latest.route,
       safeAreaInsets: latest.safeAreaInsets,
-      onPageOwnsSafeArea: (owns) => argsRef.current.onPageOwnsSafeArea(owns),
       pageRoutes: latest.pageRoutes,
       pageRouteGrants: latest.pageRouteGrants,
       routeGrants: latest.routeGrants,
@@ -222,7 +222,7 @@ export function useMobileWebShellBridge(args: MobileWebShellBridgeArgs): MobileW
       onRouteParamClear: (param, value) => argsRef.current.onRouteParamClear(param, value),
       onRouteRefused: (issue) => argsRef.current.onRouteRefused(issue),
       onBinaryFramesDropped: (total) => argsRef.current.onBinaryFramesDropped(total),
-      onPageReady: (reports) => argsRef.current.onPageReady(reports),
+      onPageReady: (ready) => argsRef.current.onPageReady(ready),
       onPagePainted: () => argsRef.current.onPagePainted(),
       onPageBackClaim: (claimed) => argsRef.current.onPageBackClaim(claimed)
     })
