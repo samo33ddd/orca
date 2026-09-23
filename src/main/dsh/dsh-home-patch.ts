@@ -103,20 +103,15 @@ function isComment(line: string): boolean {
   return line.trim().startsWith('#')
 }
 
-/** Index of a top-level `[]` document body, or -1 when the file has real content. */
-function findEmptyFlowSequenceLine(lines: readonly string[]): number {
-  let found = -1
-  for (const [index, line] of lines.entries()) {
-    if (isBlank(line) || isComment(line)) {
-      continue
-    }
-    if (line.trim() === EMPTY_FLOW_SEQUENCE && found === -1) {
-      found = index
-      continue
-    }
-    return -1
-  }
-  return found
+/** True when the document body is nothing but an empty flow sequence (`[]`). */
+function isEmptyFlowDocument(lines: readonly string[]): boolean {
+  const body = lines.filter((line) => !isBlank(line) && !isComment(line))
+  return body.length === 1 && body[0].trim() === EMPTY_FLOW_SEQUENCE
+}
+
+function withoutTrailingBlanks(lines: readonly string[]): readonly string[] {
+  const end = lines.findLastIndex((line) => !isBlank(line))
+  return lines.slice(0, end + 1)
 }
 
 function joinPreservingTrailingNewline(lines: readonly string[]): string {
@@ -129,26 +124,22 @@ function joinPreservingTrailingNewline(lines: readonly string[]): string {
  * `managedHooksPath`. Everything outside the markers is preserved.
  */
 export function applyManagedDshPatch(text: string, managedHooksPath: string): string {
-  const region = findManagedDshPatchRegion(text)
+  const lines = splitLines(text)
   const block = buildManagedBlock(managedHooksPath)
+  const region = findManagedDshPatchRegion(text)
   if (region) {
-    const lines = splitLines(text)
     return joinPreservingTrailingNewline([
       ...lines.slice(0, region.startLine),
       ...block,
       ...lines.slice(region.endLine + 1)
     ])
   }
-
-  let lines = splitLines(text)
-  const emptyFlowLine = findEmptyFlowSequenceLine(lines)
-  if (emptyFlowLine !== -1) {
-    lines = [...lines.slice(0, emptyFlowLine), ...lines.slice(emptyFlowLine + 1)]
-  }
-  while (lines.length > 0 && isBlank(lines.at(-1) ?? '')) {
-    lines.pop()
-  }
-  return joinPreservingTrailingNewline(lines.length > 0 ? [...lines, ...block] : block)
+  // Why dropped: `- item` after `[]` is a parse error, and a file whose whole body is `[]`
+  // has nothing else to preserve. Comments survive the filter.
+  const kept = isEmptyFlowDocument(lines)
+    ? lines.filter((line) => line.trim() !== EMPTY_FLOW_SEQUENCE)
+    : lines
+  return joinPreservingTrailingNewline([...withoutTrailingBlanks(kept), ...block])
 }
 
 /** Strip Orca's managed region, restoring `[]` when nothing else is left. */
@@ -157,12 +148,11 @@ export function removeManagedDshPatch(text: string): { text: string; changed: bo
   if (!region) {
     return { text, changed: false }
   }
-  let lines = stripRegion(splitLines(text), region)
-  while (lines.length > 0 && isBlank(lines.at(-1) ?? '')) {
-    lines.pop()
-  }
-  if (lines.every((line) => isBlank(line) || isComment(line))) {
-    lines = [...lines, EMPTY_FLOW_SEQUENCE]
-  }
-  return { text: joinPreservingTrailingNewline(lines), changed: true }
+  const kept = withoutTrailingBlanks(stripRegion(splitLines(text), region))
+  // Why restore `[]`: a document of comments alone is not a valid entry list, so removing
+  // Orca's block must not leave DSH a file it cannot parse.
+  const body = kept.every((line) => isBlank(line) || isComment(line))
+    ? [...kept, EMPTY_FLOW_SEQUENCE]
+    : kept
+  return { text: joinPreservingTrailingNewline(body), changed: true }
 }

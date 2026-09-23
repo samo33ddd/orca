@@ -4,11 +4,11 @@ import {
   buildManagedCommandHook,
   createManagedCommandMatcher,
   getSharedManagedScriptPath,
-  isPlainObject,
   wrapPosixHookCommand,
   wrapWindowsHookCommand,
   type HookDefinition
 } from '../agent-hooks/installer-utils'
+import { readManagedHookEventsFromJson } from '../agent-hooks/managed-hooks-json-events'
 
 const DSH_SCRIPT_BASE = 'dsh-hook'
 
@@ -106,40 +106,5 @@ export function readManagedDshHookEvents(
   parsed: unknown,
   isManagedCommand: (command: string | undefined) => boolean
 ): Set<string> {
-  const present = new Set<string>()
-  if (!isPlainObject(parsed) || !isPlainObject(parsed.hooks)) {
-    return present
-  }
-  for (const event of DSH_HOOK_EVENTS) {
-    const definitions = parsed.hooks[event]
-    if (!Array.isArray(definitions)) {
-      continue
-    }
-    // Why: a hand-edited managed file can hold null definitions or non-array hook lists;
-    // treat all of them as absent so status calculation never throws on user content.
-    if (
-      definitions.some((definition) =>
-        managedHookEntries(definition).some((hook) => isManagedCommand(hookEntryCommand(hook)))
-      )
-    ) {
-      present.add(event)
-    }
-  }
-  return present
-}
-
-function managedHookEntries(definition: unknown): readonly unknown[] {
-  if (!isPlainObject(definition)) {
-    return []
-  }
-  const hooks = definition.hooks
-  return Array.isArray(hooks) ? hooks : []
-}
-
-function hookEntryCommand(hook: unknown): string | undefined {
-  if (!isPlainObject(hook)) {
-    return undefined
-  }
-  const command = hook.command
-  return typeof command === 'string' ? command : undefined
+  return readManagedHookEventsFromJson(parsed, DSH_HOOK_EVENTS, isManagedCommand)
 }

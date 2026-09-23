@@ -17,11 +17,9 @@ const NON_INTERACTIVE_PROFILES = new Set([
   'desktop'
 ])
 
-/** Subcommands that never boot a profile at all. */
-const NON_BOOT_SUBCOMMANDS = new Set(['plugin'])
-
-/** The documented bare-word alias for `--profile web`; the only one the launcher takes. */
-const WEB_SUBCOMMAND = 'web'
+/** Bare-word subcommands the launcher accepts: `plugin` boots no profile at all, and `web`
+ *  is the documented alias for `--profile web`. Neither hosts an interactive pane. */
+const SUBCOMMANDS = new Set(['plugin', 'web'])
 
 /** Launcher flags that print a composed config and exit. */
 const DUMP_FLAGS = new Set(['--dump-config', '--dump-default-config', '--dump-config-schema'])
@@ -54,13 +52,13 @@ const LAUNCHER_FLAGS_WITH_VALUE = new Set(['--profile', '--from-default-profile'
 /** Valueless launcher flags. */
 const LAUNCHER_FLAGS = new Set(['-V', '--version', '-h', '--help', ...DUMP_FLAGS])
 
+/** Splits `--profile=web` down to `--profile` so both spellings match one lookup. */
+function flagName(token: string): string {
+  return token.split('=', 1)[0]
+}
+
 function isLauncherToken(token: string): boolean {
-  if (LAUNCHER_FLAGS.has(token)) {
-    return true
-  }
-  return [...LAUNCHER_FLAGS_WITH_VALUE].some(
-    (flag) => token === flag || token.startsWith(`${flag}=`)
-  )
+  return LAUNCHER_FLAGS.has(token) || LAUNCHER_FLAGS_WITH_VALUE.has(flagName(token))
 }
 
 /**
@@ -88,7 +86,7 @@ export function isDshNonInteractiveCommand(tokens: readonly string[]): boolean {
   // Skip the leading non-flag tokens: an interpreter invocation puts the script path here.
   while (index < tokens.length && !isLauncherToken(tokens[index])) {
     const token = tokens[index]
-    if (NON_BOOT_SUBCOMMANDS.has(token) || token === WEB_SUBCOMMAND) {
+    if (SUBCOMMANDS.has(token)) {
       return true
     }
     if (!token.startsWith('-') && index > 1) {

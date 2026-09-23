@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, unlinkSync } from 'node:fs'
+import { mkdirSync, readFileSync, rmSync } from 'node:fs'
 import { dirname } from 'node:path'
 import type { SFTPWrapper } from 'ssh2'
 
@@ -87,40 +87,37 @@ function getManagedScript(target: 'local' | 'posix' = 'local'): string {
   ].join('\n')
 }
 
-/** '' when the file is absent (DSH creates it lazily), null when it exists but is unreadable. */
-function readPatchText(configPath: string): string | null {
+/** '' when the file is absent (both are created lazily), null when it exists but cannot be read. */
+function readTextOrAbsent(path: string): string | null {
   try {
-    return readFileSync(configPath, 'utf-8')
+    return readFileSync(path, 'utf-8')
   } catch (error) {
     return isDefinitiveAbsence(error) ? '' : null
   }
 }
 
-function readManagedHooksFile(managedHooksPath: string): string | null {
-  if (!existsSync(managedHooksPath)) {
-    return ''
-  }
+/** null for anything that is not parseable JSON; the caller reads that as "no events". */
+function parseJsonOrNull(text: string): unknown {
   try {
-    return readFileSync(managedHooksPath, 'utf-8')
+    return JSON.parse(text)
   } catch {
     return null
   }
 }
 
-function parseManagedHooksFile(text: string): unknown {
-  if (text.trim().length === 0) {
-    return null
-  }
-  try {
-    const parsed: unknown = JSON.parse(text)
-    return parsed
-  } catch {
-    return null
-  }
+function writePatchText(configPath: string, text: string): void {
+  mkdirSync(dirname(configPath), { recursive: true })
+  // Why writeHooksJson: it owns the temp+rename and the rolling .bak this file needs too.
+  writeHooksJson(configPath, {}, { serialized: text })
 }
 
-function errorStatus(configPath: string, detail: string): AgentHookInstallStatus {
-  return { agent: 'dsh', state: 'error', configPath, managedHooksPresent: false, detail }
+function status(
+  configPath: string,
+  state: AgentHookInstallState,
+  detail: string | null,
+  managedHooksPresent = false
+): AgentHookInstallStatus {
+  return { agent: 'dsh', state, configPath, managedHooksPresent, detail }
 }
 
 function buildStatus(
@@ -129,45 +126,32 @@ function buildStatus(
   managedText: string | null,
   configPath: string
 ): AgentHookInstallStatus {
-  const base = { agent: 'dsh' as const, configPath }
   if (managedText === null) {
-    return {
-      ...base,
-      state: 'error',
-      managedHooksPresent: false,
-      detail: 'Could not read Orca managed hooks file'
-    }
+    return status(configPath, 'error', 'Could not read Orca managed hooks file')
   }
   const pointer = readManagedDshHooksConfigPath(patchText)
   if (pointer !== managedHooksPath) {
-    return {
-      ...base,
-      state: 'not_installed',
-      managedHooksPresent: false,
-      detail:
-        pointer === undefined
-          ? null
-          : `The Orca patch block points at ${pointer}, not the Orca managed hooks file`
-    }
+    return status(
+      configPath,
+      'not_installed',
+      pointer === undefined
+        ? null
+        : `The Orca patch block points at ${pointer}, not the Orca managed hooks file`
+    )
   }
   const present = readManagedDshHookEvents(
-    parseManagedHooksFile(managedText),
+    parseJsonOrNull(managedText),
     getDshManagedCommandMatcher()
   )
   const missing = DSH_HOOK_EVENTS.filter((event) => !present.has(event))
-  let state: AgentHookInstallState
-  let detail: string | null
   if (missing.length === 0) {
-    state = 'installed'
-    detail = null
-  } else if (present.size === 0) {
-    state = 'not_installed'
-    detail = null
-  } else {
-    state = 'partial'
-    detail = `Managed hook missing for events: ${missing.join(', ')}`
+    return status(configPath, 'installed', null, true)
   }
-  return { ...base, state, managedHooksPresent: present.size > 0, detail }
+  // Why the split: nothing present is an uninstalled agent; some present is a broken install,
+  // and naming the gap is the only way a user can tell those apart.
+  return present.size === 0
+    ? status(configPath, 'not_installed', null)
+    : status(configPath, 'partial', `Managed hook missing for events: ${missing.join(', ')}`, true)
 }
 
 export class DshHookService {
@@ -177,24 +161,19 @@ export class DshHookService {
 
   getStatus(): AgentHookInstallStatus {
     const configPath = getDshConfigPath()
-    const patchText = readPatchText(configPath)
+    const patchText = readTextOrAbsent(configPath)
     if (patchText === null) {
-      return errorStatus(configPath, 'Could not read the DSH home patch file')
+      return status(configPath, 'error', 'Could not read the DSH home patch file')
     }
     const managedHooksPath = getDshManagedHooksPath()
-    return buildStatus(
-      patchText,
-      managedHooksPath,
-      readManagedHooksFile(managedHooksPath),
-      configPath
-    )
+    return buildStatus(patchText, managedHooksPath, readTextOrAbsent(managedHooksPath), configPath)
   }
 
   install(): AgentHookInstallStatus {
     const configPath = getDshConfigPath()
-    const patchText = readPatchText(configPath)
+    const patchText = readTextOrAbsent(configPath)
     if (patchText === null) {
-      return errorStatus(configPath, 'Could not read the DSH home patch file')
+      return status(configPath, 'error', 'Could not read the DSH home patch file')
     }
     const scriptPath = getDshManagedScriptPath()
     const managedHooksPath = getDshManagedHooksPath()
@@ -208,8 +187,7 @@ export class DshHookService {
     )
     const nextText = applyManagedDshPatch(patchText, managedHooksPath)
     if (nextText !== patchText) {
-      mkdirSync(dirname(configPath), { recursive: true })
-      writeHooksJson(configPath, {}, { serialized: nextText })
+      writePatchText(configPath, nextText)
     }
     return this.getStatus()
   }
@@ -232,37 +210,24 @@ export class DshHookService {
         remoteConfigPath,
         applyManagedDshPatch(body, remoteManagedHooksPath)
       )
-      return {
-        agent: 'dsh',
-        state: 'installed',
-        configPath: remoteConfigPath,
-        managedHooksPresent: true,
-        detail: null
-      }
+      return status(remoteConfigPath, 'installed', null, true)
     } catch (err) {
-      return errorStatus(remoteConfigPath, err instanceof Error ? err.message : String(err))
+      return status(remoteConfigPath, 'error', err instanceof Error ? err.message : String(err))
     }
   }
 
   remove(): AgentHookInstallStatus {
     const configPath = getDshConfigPath()
-    const patchText = readPatchText(configPath)
+    const patchText = readTextOrAbsent(configPath)
     if (patchText === null) {
-      return errorStatus(configPath, 'Could not read the DSH home patch file')
+      return status(configPath, 'error', 'Could not read the DSH home patch file')
     }
     const { text: nextText, changed } = removeManagedDshPatch(patchText)
     if (changed) {
-      mkdirSync(dirname(configPath), { recursive: true })
-      writeHooksJson(configPath, {}, { serialized: nextText })
+      writePatchText(configPath, nextText)
     }
-    try {
-      const managedHooksPath = getDshManagedHooksPath()
-      if (existsSync(managedHooksPath)) {
-        unlinkSync(managedHooksPath)
-      }
-    } catch {
-      // best effort
-    }
+    // Why force: the file is Orca's own and may already be gone; its absence is the goal.
+    rmSync(getDshManagedHooksPath(), { force: true })
     return this.getStatus()
   }
 }
