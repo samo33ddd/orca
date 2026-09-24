@@ -215,6 +215,66 @@ describe('Codex transcript history modes', () => {
     })
   })
 
+  it('reads inter-agent response items with their message identity and participants', async () => {
+    const filePath = await writeCodexFixture([
+      {
+        type: 'response_item',
+        payload: {
+          type: 'agent_message',
+          id: 'agent-message-1',
+          author: '/root/worker',
+          recipient: '/root',
+          content: [{ type: 'input_text', text: 'The change is ready.' }]
+        }
+      }
+    ])
+    const result = await readNativeChatTranscript('codex', 'session-1', { filePath })
+
+    expect(result).toMatchObject({
+      messages: [
+        {
+          id: 'agent-message-1',
+          role: 'assistant',
+          blocks: [{ type: 'text', text: 'From: /root/worker\nTo: /root\n\nThe change is ready.' }]
+        }
+      ]
+    })
+  })
+
+  it('shows an unavailable marker for encrypted content without exposing its header or bytes', () => {
+    const message = decodeCodexTranscriptLine(
+      JSON.stringify({
+        type: 'response_item',
+        payload: {
+          type: 'agent_message',
+          id: 'agent-message-2',
+          author: '/root/worker',
+          recipient: '/root',
+          content: [
+            {
+              type: 'input_text',
+              text: 'Message Type: MESSAGE\nTask name: /root\nSender: /root/worker\nPayload:\n'
+            },
+            { type: 'encrypted_content', encrypted_content: 'ciphertext-must-not-render' }
+          ]
+        }
+      }),
+      'fallback-agent-message'
+    )
+
+    expect(message).toMatchObject({
+      id: 'agent-message-2',
+      blocks: [
+        {
+          type: 'text',
+          text: 'From: /root/worker\nTo: /root\n\nEncrypted message content is unavailable.'
+        }
+      ]
+    })
+    expect(JSON.stringify(message)).not.toContain('ciphertext-must-not-render')
+    expect(JSON.stringify(message)).not.toContain('Message Type:')
+  })
+
   it('decodes freeform tool calls and outputs', () => {
     const call = decodeCodexTranscriptLine(
       JSON.stringify({
