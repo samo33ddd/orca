@@ -1,12 +1,13 @@
-import { basename, dirname, extname, isAbsolute, join } from 'node:path'
+import { extname, isAbsolute } from 'node:path'
 
 import {
   readJsonlCursor,
-  readTranscriptDirectory,
   record,
   type JsonlCursor,
   type JsonRecord
 } from './codex-rollout-jsonl-cursor'
+import { BoundedMap } from './bounded-map'
+import { resolveChildTranscript, SAFE_THREAD_ID } from './codex-subagent-transcript-path'
 
 import { readApprovalsReviewer } from './codex-subagent-reviewer'
 import type { CodexApprovalsReviewer } from './codex-subagent-reviewer'
@@ -18,23 +19,26 @@ import {
   type CodexSubagentRoster
 } from './codex-subagent-roster'
 
-// Why: retire a child whose rollout stays unreadable this long, else a deleted/never-written file pins a phantom row forever.
-const CHILD_UNREADABLE_GRACE_MS = 60_000
-const SAFE_THREAD_ID = /^[A-Za-z0-9-]{1,64}$/
-
 type TrackedTranscriptSubagent = JsonlCursor & {
+  awaitingRetiredTurnComplete?: boolean
+  awaitingTaskStarted?: boolean
+  completedTurnId?: string
+  currentTurnId?: string
   description?: string
-  /** Latest model seen in the child's own rollout. Retained across polls
-   *  because the cursor is incremental: `turn_context` is emitted once per
-   *  turn, so a later read usually carries no model at all. */
+  /** Retained because incremental reads rarely repeat the child's turn_context. */
   model?: string
+  retiredTurnId?: string
   startedAt: number
-  unresolvedSince?: number
 }
+
+// ponytail: both session ledgers retain 256 entries; raise only if long sessions prove this cap is hit.
+const MAX_SUBAGENT_TRACKING_ENTRIES = 256
 
 export type CodexSubagentTranscriptState = {
   parent: JsonlCursor
   subagents: Map<string, TrackedTranscriptSubagent>
+  followupTaskCallIds: BoundedMap<string, true>
+  retiredSubagentCursorsById: BoundedMap<string, TrackedTranscriptSubagent>
   /** Incremental reviewer cursors for child rollouts, which must not replace the parent cursor. */
   reviewerCursorsByPath: Map<string, JsonlCursor>
   /** Reviewer ownership discovered from child rollouts, keyed by their bounded cursor paths. */
@@ -43,64 +47,12 @@ export type CodexSubagentTranscriptState = {
   approvalsReviewer?: CodexApprovalsReviewer
 }
 
-// Why: Codex files each rollout under its OWN local start date, so a session running past midnight spawns children into a sibling day directory.
-function childDayDirectory(parentPath: string, startedAt: number): string | undefined {
-  const dayDir = dirname(parentPath)
-  const monthDir = dirname(dayDir)
-  const yearDir = dirname(monthDir)
-  if (
-    !/^\d{2}$/.test(basename(dayDir)) ||
-    !/^\d{2}$/.test(basename(monthDir)) ||
-    !/^\d{4}$/.test(basename(yearDir)) ||
-    !Number.isFinite(startedAt)
-  ) {
-    return undefined
-  }
-  const startedOn = new Date(startedAt)
-  if (Number.isNaN(startedOn.getTime())) {
-    return undefined
-  }
-  const pad = (value: number): string => String(value).padStart(2, '0')
-  return join(
-    dirname(yearDir),
-    String(startedOn.getFullYear()).padStart(4, '0'),
-    pad(startedOn.getMonth() + 1),
-    pad(startedOn.getDate())
-  )
-}
-
-function resolveChildTranscript(
-  parentPath: string,
-  threadId: string,
-  startedAt: number,
-  entriesByDirectory: Map<string, string[]>
-): string | undefined {
-  if (!SAFE_THREAD_ID.test(threadId)) {
-    return undefined
-  }
-  const suffix = `-${threadId}.jsonl`
-  const parentDir = dirname(parentPath)
-  const childDir = childDayDirectory(parentPath, startedAt)
-  const directories = childDir && childDir !== parentDir ? [parentDir, childDir] : [parentDir]
-  for (const directory of directories) {
-    let entries = entriesByDirectory.get(directory)
-    if (!entries) {
-      entries = readTranscriptDirectory(directory)
-      entriesByDirectory.set(directory, entries)
-    }
-    const fileName = entries.find((entry) => entry.endsWith(suffix))
-    if (fileName) {
-      return join(directory, fileName)
-    }
-  }
-  return undefined
-}
-
 function readActivity(recordValue: JsonRecord):
   | {
       id: string
       description?: string
-      kind: 'started' | 'interacted' | 'interrupted'
+      eventId?: string
+      kind: 'started' | 'interacted' | 'interrupted' | 'completed'
       startedAt: number
     }
   | undefined {
@@ -115,7 +67,10 @@ function readActivity(recordValue: JsonRecord):
   const rawKind = typeof payload.kind === 'string' ? payload.kind.toLowerCase() : ''
   if (
     !SAFE_THREAD_ID.test(id) ||
-    (rawKind !== 'started' && rawKind !== 'interacted' && rawKind !== 'interrupted')
+    (rawKind !== 'started' &&
+      rawKind !== 'interacted' &&
+      rawKind !== 'interrupted' &&
+      rawKind !== 'completed')
   ) {
     return undefined
   }
@@ -123,6 +78,8 @@ function readActivity(recordValue: JsonRecord):
     id,
     description:
       typeof payload.agent_path === 'string' ? payload.agent_path.trim() || undefined : undefined,
+    eventId:
+      typeof payload.event_id === 'string' ? payload.event_id.trim() || undefined : undefined,
     kind: rawKind,
     startedAt:
       typeof payload.occurred_at_ms === 'number' && Number.isFinite(payload.occurred_at_ms)
@@ -131,9 +88,32 @@ function readActivity(recordValue: JsonRecord):
   }
 }
 
-/** Latest model from the child's own `turn_context` records. A child can be
- *  launched on a different model than its parent, so this is read from the
- *  child rollout rather than inherited. */
+function readFollowupTaskCallId(recordValue: JsonRecord): string | undefined {
+  const payload = recordValue.type === 'response_item' ? record(recordValue.payload) : recordValue
+  if (payload?.type !== 'function_call' || payload.name !== 'followup_task') {
+    return undefined
+  }
+  const callId = typeof payload.call_id === 'string' ? payload.call_id : payload.id
+  return typeof callId === 'string' ? callId.trim() || undefined : undefined
+}
+
+function readCompletedTurnId(kind: string, eventId: string | undefined): string | undefined {
+  const prefix = 'subagent-completed-'
+  return kind === 'completed' && eventId?.startsWith(prefix)
+    ? eventId.slice(prefix.length) || undefined
+    : undefined
+}
+
+function storeChildCursor(
+  state: CodexSubagentTranscriptState,
+  id: string,
+  cursor: TrackedTranscriptSubagent
+) {
+  state.retiredSubagentCursorsById.delete(id)
+  state.retiredSubagentCursorsById.set(id, { ...cursor })
+}
+
+/** Reads the child's model from its own rollout, never from the parent. */
 function readChildModel(records: JsonRecord[]): string | undefined {
   let model: string | undefined
   for (const recordValue of records) {
@@ -156,16 +136,35 @@ function normalizedTranscriptPath(transcriptPath: string | undefined): string | 
     : undefined
 }
 
-function childIsComplete(records: JsonRecord[]): boolean {
+function childIsComplete(records: JsonRecord[], tracked: TrackedTranscriptSubagent): boolean {
   let complete = false
   for (const recordValue of records) {
     if (recordValue.type !== 'event_msg') {
       continue
     }
     const payload = record(recordValue.payload)
+    const turnId = typeof payload?.turn_id === 'string' ? payload.turn_id.trim() : ''
+    if (tracked.awaitingRetiredTurnComplete) {
+      if (payload?.type === 'task_complete' && turnId === tracked.retiredTurnId) {
+        tracked.completedTurnId = turnId
+        tracked.awaitingRetiredTurnComplete = false
+      }
+      continue
+    }
     if (payload?.type === 'task_started') {
+      if (tracked.retiredTurnId && (!turnId || turnId === tracked.retiredTurnId)) {
+        continue
+      }
+      tracked.currentTurnId = turnId || tracked.currentTurnId
+      tracked.awaitingTaskStarted = false
       complete = false
-    } else if (payload?.type === 'task_complete') {
+    } else if (
+      payload?.type === 'task_complete' &&
+      !tracked.awaitingTaskStarted &&
+      (!tracked.retiredTurnId ||
+        (turnId && turnId === tracked.currentTurnId && turnId !== tracked.retiredTurnId))
+    ) {
+      tracked.completedTurnId = turnId || tracked.currentTurnId
       complete = true
     }
   }
@@ -176,6 +175,12 @@ export function createCodexSubagentTranscriptState(): CodexSubagentTranscriptSta
   return {
     parent: { offset: 0, carry: '' },
     subagents: new Map(),
+    followupTaskCallIds: new BoundedMap<string, true>({
+      maxEntries: MAX_SUBAGENT_TRACKING_ENTRIES
+    }),
+    retiredSubagentCursorsById: new BoundedMap<string, TrackedTranscriptSubagent>({
+      maxEntries: MAX_SUBAGENT_TRACKING_ENTRIES
+    }),
     reviewerCursorsByPath: new Map(),
     reviewersByPath: new Map()
   }
@@ -202,6 +207,12 @@ export function reconcileCodexSubagentTranscript(
     }
     state.parent = { filePath: normalizedPath, offset: 0, carry: '' }
     state.subagents.clear()
+    state.followupTaskCallIds = new BoundedMap<string, true>({
+      maxEntries: MAX_SUBAGENT_TRACKING_ENTRIES
+    })
+    state.retiredSubagentCursorsById = new BoundedMap<string, TrackedTranscriptSubagent>({
+      maxEntries: MAX_SUBAGENT_TRACKING_ENTRIES
+    })
     state.reviewerCursorsByPath.clear()
     state.reviewersByPath.clear()
     // Why: a different rollout is a different session, so its predecessor's reviewer is void.
@@ -213,20 +224,59 @@ export function reconcileCodexSubagentTranscript(
     parentRecords === undefined
       ? undefined
       : (readApprovalsReviewer(parentRecords) ?? state.approvalsReviewer)
+  const entriesByDirectory = new Map<string, string[]>()
+  const childPathFor = (id: string, startedAt: number) =>
+    resolveChildTranscript(normalizedPath, id, startedAt, entriesByDirectory)
   for (const recordValue of parentRecords ?? []) {
+    const followupCallId = readFollowupTaskCallId(recordValue)
+    if (followupCallId) {
+      state.followupTaskCallIds.set(followupCallId, true)
+    }
+    const output = recordValue.type === 'response_item' ? record(recordValue.payload) : undefined
+    if (output?.type === 'function_call_output' && typeof output.call_id === 'string') {
+      state.followupTaskCallIds.delete(output.call_id.trim())
+    }
     const activity = readActivity(recordValue)
     if (!activity) {
       continue
     }
-    if (activity.kind === 'interrupted') {
+    const followupTriggered = activity.eventId
+      ? state.followupTaskCallIds.delete(activity.eventId)
+      : false
+    if (activity.kind === 'interacted' && !followupTriggered) {
+      continue
+    }
+    const pathSegments = activity.description?.split('/').filter(Boolean)
+    if (pathSegments?.length === 1 && pathSegments[0] === 'root') {
+      continue
+    }
+    if (activity.kind === 'interrupted' || activity.kind === 'completed') {
+      const tracked = state.subagents.get(activity.id)
+      const retired = state.retiredSubagentCursorsById.get(activity.id)
+      const completedTurnId = readCompletedTurnId(activity.kind, activity.eventId)
+      if (completedTurnId && tracked?.retiredTurnId === completedTurnId) {
+        continue
+      }
+      const cursor = tracked ?? retired ?? { offset: 0, carry: '', startedAt: activity.startedAt }
+      const retiredTurnId = completedTurnId ?? cursor.currentTurnId ?? cursor.retiredTurnId
+      cursor.retiredTurnId = retiredTurnId
+      cursor.awaitingRetiredTurnComplete =
+        activity.kind === 'completed' &&
+        Boolean(retiredTurnId) &&
+        cursor.completedTurnId !== retiredTurnId
+      storeChildCursor(state, activity.id, cursor)
       finishCodexSubagent(roster, activity.id)
       state.subagents.delete(activity.id)
       continue
     }
+    const retiredCursor = state.retiredSubagentCursorsById.get(activity.id)
     const tracked = state.subagents.get(activity.id) ?? {
-      offset: 0,
-      carry: '',
+      ...(retiredCursor ?? { offset: 0, carry: '' }),
+      awaitingTaskStarted: Boolean(retiredCursor),
       startedAt: activity.startedAt
+    }
+    if (retiredCursor) {
+      state.retiredSubagentCursorsById.delete(activity.id)
     }
     tracked.description = activity.description ?? tracked.description
     state.subagents.set(activity.id, tracked)
@@ -237,36 +287,22 @@ export function reconcileCodexSubagentTranscript(
       tracked.startedAt
     )
   }
-  const entriesByDirectory = new Map<string, string[]>()
-  const now = Date.now()
   for (const [id, tracked] of state.subagents) {
-    if (!tracked.filePath) {
-      tracked.filePath = resolveChildTranscript(
-        normalizedPath,
-        id,
-        tracked.startedAt,
-        entriesByDirectory
-      )
-    }
+    tracked.filePath ??= childPathFor(id, tracked.startedAt)
     const records = readJsonlCursor(tracked)
     if (!records) {
-      // Why: a rollout that never appears (or is deleted) has no completion event, so time-box it instead of leaking a working row.
+      // A missing rollout cannot prove the child exited; wait for terminal activity.
       tracked.filePath = undefined
-      tracked.unresolvedSince ??= now
-      if (now - tracked.unresolvedSince <= CHILD_UNREADABLE_GRACE_MS) {
-        continue
-      }
-    } else {
-      tracked.unresolvedSince = undefined
-      tracked.model = readChildModel(records) ?? tracked.model
-      // Why: re-applied every reconcile, not just on discovery — the parent's
-      // own activity upsert can rebuild this child's roster entry, which would
-      // otherwise drop a model found on an earlier poll.
-      setCodexSubagentModel(roster, id, tracked.model)
-      if (!childIsComplete(records)) {
-        continue
-      }
+      continue
     }
+    tracked.model = readChildModel(records) ?? tracked.model
+    // Reapply after each upsert, which can rebuild the child roster row.
+    setCodexSubagentModel(roster, id, tracked.model)
+    if (!childIsComplete(records, tracked)) {
+      continue
+    }
+    tracked.retiredTurnId = tracked.currentTurnId
+    storeChildCursor(state, id, tracked)
     finishCodexSubagent(roster, id)
     state.subagents.delete(id)
   }
