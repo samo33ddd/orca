@@ -46,4 +46,21 @@ describe('assembler ↔ id-merge parity on single-source data', () => {
     expect(assembled.map((m) => m.id)).toEqual(merged.map((m) => m.id))
     expect(assembled).toHaveLength(transcript.length)
   })
+
+  it('keeps one attributed inter-agent message when live and transcript copies share an id', () => {
+    const attributedMessage = msg({
+      id: 'agent-message-1',
+      blocks: [{ type: 'text', text: 'From: /root/worker\nTo: /root\n\nThe change is ready.' }]
+    })
+    const assembled = assembleNativeChatSession({
+      sources: {
+        transcript: [attributedMessage],
+        hook: [{ ...attributedMessage, source: 'hook' }]
+      },
+      sessionId: 'session-1',
+      agent: 'codex'
+    }).messages
+
+    expect(assembled).toEqual([attributedMessage])
+  })
 })

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import type * as NodeFs from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -31,17 +31,43 @@ function jsonl(records: unknown[]): string {
   return `${records.map((record) => JSON.stringify(record)).join('\n')}\n`
 }
 
-function activity(kind: string, occurredAtMs = 1234): unknown {
+function activity(
+  kind: string,
+  occurredAtMs = 1234,
+  agentThreadId = CHILD_ID,
+  agentPath = '/root/sidebar_repro',
+  eventId = `${agentThreadId}-${kind}-${occurredAtMs}`
+): unknown {
   return {
     type: 'event_msg',
     payload: {
       type: 'sub_agent_activity',
+      event_id: eventId,
       occurred_at_ms: occurredAtMs,
-      agent_thread_id: CHILD_ID,
-      agent_path: '/root/sidebar_repro',
+      agent_thread_id: agentThreadId,
+      agent_path: agentPath,
       kind
     }
   }
+}
+
+function toolCall(name: 'send_message' | 'followup_task', callId: string): unknown {
+  return {
+    type: 'response_item',
+    payload: { type: 'function_call', call_id: callId, name, arguments: '{}' }
+  }
+}
+
+function toolCallOutput(callId: string): unknown {
+  return { type: 'response_item', payload: { type: 'function_call_output', call_id: callId } }
+}
+
+function childTaskEvent(
+  type: 'task_started' | 'task_complete',
+  turnId: string,
+  outcome?: 'error'
+): unknown {
+  return { type: 'event_msg', payload: { type, turn_id: turnId, ...(outcome ? { outcome } : {}) } }
 }
 
 /** `<root>/YYYY/MM/DD` for a timestamp, matching how Codex buckets rollouts by local start date. */
@@ -128,7 +154,7 @@ describe('Codex subagent transcript reconciliation', () => {
     expect(hasTrackedCodexTranscriptSubagents(state)).toBe(false)
   })
 
-  it('retires a child whose rollout never becomes readable', () => {
+  it('does not treat an unreadable child rollout as proof of completion', () => {
     vi.useFakeTimers()
     try {
       const dir = mkdtempSync(join(tmpdir(), 'codex-subagent-transcript-'))
@@ -148,8 +174,8 @@ describe('Codex subagent transcript reconciliation', () => {
 
       vi.advanceTimersByTime(31_000)
       reconcileCodexSubagentTranscript(state, roster, parentPath)
-      expect(roster.size).toBe(0)
-      expect(hasTrackedCodexTranscriptSubagents(state)).toBe(false)
+      expect(roster.size).toBe(1)
+      expect(hasTrackedCodexTranscriptSubagents(state)).toBe(true)
     } finally {
       vi.useRealTimers()
     }
@@ -169,6 +195,219 @@ describe('Codex subagent transcript reconciliation', () => {
 
     expect(hasTrackedCodexTranscriptSubagents(state)).toBe(false)
     expect(roster.size).toBe(0)
+  })
+
+  it('removes a child on the current completed activity even without a readable child rollout', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'codex-subagent-transcript-'))
+    dirs.push(dir)
+    const parentPath = join(dir, 'rollout-parent.jsonl')
+    writeFileSync(
+      parentPath,
+      jsonl([
+        activity('started'),
+        activity('started'),
+        activity('completed', 1235),
+        activity('completed', 1235)
+      ])
+    )
+    const state = createCodexSubagentTranscriptState()
+    const roster: CodexSubagentRoster = new Map()
+
+    reconcileCodexSubagentTranscript(state, roster, parentPath)
+
+    expect(roster.size).toBe(0)
+    expect(hasTrackedCodexTranscriptSubagents(state)).toBe(false)
+  })
+
+  it('does not count the root agent path as its own child', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'codex-subagent-transcript-'))
+    dirs.push(dir)
+    const parentPath = join(dir, 'rollout-parent.jsonl')
+    writeFileSync(parentPath, jsonl([activity('started', 1234, 'root-thread', '/root')]))
+    const state = createCodexSubagentTranscriptState()
+    const roster: CodexSubagentRoster = new Map()
+
+    reconcileCodexSubagentTranscript(state, roster, parentPath)
+
+    expect(roster.size).toBe(0)
+    expect(hasTrackedCodexTranscriptSubagents(state)).toBe(false)
+  })
+
+  it('keeps one child row through repeated started and interacted events', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'codex-subagent-transcript-'))
+    dirs.push(dir)
+    const parentPath = join(dir, 'rollout-parent.jsonl')
+    writeFileSync(
+      parentPath,
+      jsonl([
+        activity('started'),
+        activity('started'),
+        activity('interacted', 1235),
+        activity('interacted', 1235)
+      ])
+    )
+    const state = createCodexSubagentTranscriptState()
+    const roster: CodexSubagentRoster = new Map()
+
+    reconcileCodexSubagentTranscript(state, roster, parentPath)
+
+    expect(codexRosterToSnapshots(roster)).toMatchObject([
+      { id: CHILD_ID, state: 'working', startedAt: 1234, description: '/root/sidebar_repro' }
+    ])
+  })
+
+  it('does not reactivate a completed child for send_message but accepts followup_task', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'codex-subagent-transcript-'))
+    dirs.push(dir)
+    const parentPath = join(dir, 'rollout-parent.jsonl')
+    writeFileSync(parentPath, jsonl([activity('started')]))
+    const state = createCodexSubagentTranscriptState()
+    const roster: CodexSubagentRoster = new Map()
+
+    reconcileCodexSubagentTranscript(state, roster, parentPath)
+    expect(roster.size).toBe(1)
+
+    appendFileSync(parentPath, jsonl([activity('completed', 1235)]))
+    reconcileCodexSubagentTranscript(state, roster, parentPath)
+    expect(hasTrackedCodexTranscriptSubagents(state)).toBe(false)
+    expect(roster.size).toBe(0)
+
+    const sendMessageCallId = 'call-send-message'
+    appendFileSync(parentPath, jsonl([toolCall('send_message', sendMessageCallId)]))
+    reconcileCodexSubagentTranscript(state, roster, parentPath)
+    appendFileSync(
+      parentPath,
+      jsonl([activity('interacted', 1236, CHILD_ID, '/root/sidebar_repro', sendMessageCallId)])
+    )
+    reconcileCodexSubagentTranscript(state, roster, parentPath)
+    reconcileCodexSubagentTranscript(state, roster, parentPath)
+    expect(hasTrackedCodexTranscriptSubagents(state)).toBe(false)
+    expect(roster.size).toBe(0)
+
+    const followupCallId = 'call-followup-task'
+    appendFileSync(parentPath, jsonl([toolCall('followup_task', followupCallId)]))
+    reconcileCodexSubagentTranscript(state, roster, parentPath)
+    expect(hasTrackedCodexTranscriptSubagents(state)).toBe(false)
+    appendFileSync(
+      parentPath,
+      jsonl([
+        activity('interacted', 1237, CHILD_ID, '/root/sidebar_repro', followupCallId),
+        toolCallOutput(followupCallId)
+      ])
+    )
+    reconcileCodexSubagentTranscript(state, roster, parentPath)
+    expect(codexRosterToSnapshots(roster)).toMatchObject([
+      { id: CHILD_ID, state: 'working', startedAt: 1237, description: '/root/sidebar_repro' }
+    ])
+    reconcileCodexSubagentTranscript(state, roster, parentPath)
+    expect(codexRosterToSnapshots(roster)).toMatchObject([
+      { id: CHILD_ID, state: 'working', startedAt: 1237, description: '/root/sidebar_repro' }
+    ])
+    expect(roster.size).toBe(1)
+  })
+
+  it('keeps a followup active until the new child task completes', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'codex-subagent-transcript-'))
+    dirs.push(dir)
+    const parentPath = join(dir, 'rollout-parent.jsonl')
+    const childPath = join(dir, `rollout-child-${CHILD_ID}.jsonl`)
+    const followupCallId = 'call-followup-after-complete'
+    const olderTurnId = 'turn-older'
+    const oldTurnId = 'turn-old'
+    const newTurnId = 'turn-new'
+    writeFileSync(
+      parentPath,
+      jsonl([
+        activity('started'),
+        activity(
+          'completed',
+          1235,
+          CHILD_ID,
+          '/root/sidebar_repro',
+          `subagent-completed-${oldTurnId}`
+        )
+      ])
+    )
+    writeFileSync(
+      childPath,
+      jsonl([
+        childTaskEvent('task_started', olderTurnId),
+        childTaskEvent('task_complete', olderTurnId),
+        childTaskEvent('task_started', oldTurnId),
+        childTaskEvent('task_complete', oldTurnId)
+      ])
+    )
+    const state = createCodexSubagentTranscriptState()
+    const roster: CodexSubagentRoster = new Map()
+
+    reconcileCodexSubagentTranscript(state, roster, parentPath)
+    expect(hasTrackedCodexTranscriptSubagents(state)).toBe(false)
+    expect(roster.size).toBe(0)
+
+    appendFileSync(
+      parentPath,
+      jsonl([
+        toolCall('followup_task', followupCallId),
+        activity('interacted', 1236, CHILD_ID, '/root/sidebar_repro', followupCallId)
+      ])
+    )
+    reconcileCodexSubagentTranscript(state, roster, parentPath)
+
+    expect(codexRosterToSnapshots(roster)).toMatchObject([
+      { id: CHILD_ID, state: 'working', startedAt: 1236, description: '/root/sidebar_repro' }
+    ])
+    expect(hasTrackedCodexTranscriptSubagents(state)).toBe(true)
+
+    appendFileSync(
+      parentPath,
+      jsonl([
+        activity(
+          'completed',
+          1237,
+          CHILD_ID,
+          '/root/sidebar_repro',
+          `subagent-completed-${oldTurnId}`
+        )
+      ])
+    )
+    reconcileCodexSubagentTranscript(state, roster, parentPath)
+    expect(roster.size).toBe(1)
+
+    appendFileSync(childPath, jsonl([childTaskEvent('task_started', newTurnId)]))
+    reconcileCodexSubagentTranscript(state, roster, parentPath)
+    expect(roster.size).toBe(1)
+
+    appendFileSync(childPath, jsonl([childTaskEvent('task_complete', newTurnId, 'error')]))
+    reconcileCodexSubagentTranscript(state, roster, parentPath)
+    expect(hasTrackedCodexTranscriptSubagents(state)).toBe(false)
+    expect(roster.size).toBe(0)
+  })
+
+  it('clears failed followup calls and bounds pending followup correlations', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'codex-subagent-transcript-'))
+    dirs.push(dir)
+    const parentPath = join(dir, 'rollout-parent.jsonl')
+    const state = createCodexSubagentTranscriptState()
+    const roster: CodexSubagentRoster = new Map()
+    writeFileSync(
+      parentPath,
+      jsonl([toolCall('followup_task', 'call-failed'), toolCallOutput('call-failed')])
+    )
+
+    reconcileCodexSubagentTranscript(state, roster, parentPath)
+    expect(state.followupTaskCallIds.has('call-failed')).toBe(false)
+
+    const pendingCallIds = Array.from({ length: 260 }, (_, index) => `call-bounded-${index}`)
+    appendFileSync(
+      parentPath,
+      jsonl(pendingCallIds.map((callId) => toolCall('followup_task', callId)))
+    )
+    reconcileCodexSubagentTranscript(state, roster, parentPath)
+
+    expect(state.followupTaskCallIds.has(pendingCallIds[0] ?? '')).toBe(false)
+    expect(state.followupTaskCallIds.has(pendingCallIds[3] ?? '')).toBe(false)
+    expect(state.followupTaskCallIds.has(pendingCallIds[4] ?? '')).toBe(true)
+    expect(state.followupTaskCallIds.has(pendingCallIds.at(-1) ?? '')).toBe(true)
   })
 
   describe('child model identity', () => {
