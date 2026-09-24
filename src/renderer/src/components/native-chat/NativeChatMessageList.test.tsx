@@ -61,6 +61,37 @@ describe('NativeChatMessageList assistant messages', () => {
     expect(prose.compareDocumentPosition(controls!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
   })
 
+  it('renders inter-agent attribution and encrypted-content status in transcript prose', () => {
+    render(
+      <NativeChatMessageList
+        session={{
+          ...session,
+          messages: [
+            {
+              id: 'agent-message-1',
+              role: 'assistant',
+              blocks: [
+                {
+                  type: 'text',
+                  text: 'From: /root/worker\nTo: /root\n\nEncrypted message content is unavailable.'
+                }
+              ],
+              timestamp: 1,
+              source: 'transcript'
+            }
+          ]
+        }}
+        isWorking={false}
+        expandSignal={false}
+        fontScale={1}
+      />
+    )
+
+    expect(screen.getByText(/From: \/root\/worker/)).toBeInTheDocument()
+    expect(screen.getByText(/To: \/root/)).toBeInTheDocument()
+    expect(screen.getByText(/Encrypted message content is unavailable\./)).toBeInTheDocument()
+  })
+
   it('keeps a running tool live when transcript lifecycle metadata is absent', () => {
     render(
       <NativeChatMessageList

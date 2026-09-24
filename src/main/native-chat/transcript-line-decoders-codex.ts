@@ -59,6 +59,9 @@ function codexResponseItem(
   id: string,
   timestamp: number | null
 ): NativeChatMessage | null {
+  if (payload.type === 'agent_message') {
+    return codexAgentMessage(payload, id, timestamp)
+  }
   if (payload.type === 'message') {
     const role =
       payload.role === 'assistant' ? 'assistant' : payload.role === 'user' ? 'user' : null
@@ -113,6 +116,63 @@ function codexResponseItem(
     }
   }
   return null
+}
+
+function codexAgentMessage(
+  payload: Record<string, unknown>,
+  id: string,
+  timestamp: number | null
+): NativeChatMessage | null {
+  const author = extractString(payload.author)?.trim() || 'Unknown sender'
+  const recipient = extractString(payload.recipient)?.trim() || 'Unknown recipient'
+  const readableParts: string[] = []
+  let hasEncryptedContent = false
+  if (Array.isArray(payload.content)) {
+    for (const value of payload.content) {
+      const part = asRecord(value)
+      if (part?.type === 'encrypted_content') {
+        hasEncryptedContent = true
+        continue
+      }
+      if (part?.type !== 'input_text') {
+        continue
+      }
+      const text = extractString(part.text)
+      if (text) {
+        const body = codexAgentMessageInputText(text)
+        if (body) {
+          readableParts.push(body)
+        }
+      }
+    }
+  }
+  if (readableParts.length === 0 && !hasEncryptedContent) {
+    return null
+  }
+  const body = [
+    ...readableParts,
+    ...(hasEncryptedContent ? ['Encrypted message content is unavailable.'] : [])
+  ].join('\n')
+  return {
+    id,
+    role: 'assistant',
+    blocks: [{ type: 'text', text: `From: ${author}\nTo: ${recipient}\n\n${body}` }],
+    timestamp,
+    source: 'transcript'
+  }
+}
+
+function codexAgentMessageInputText(text: string): string | undefined {
+  const lines = text.split(/\r?\n/)
+  if (
+    /^(Message Type: MESSAGE|Message Type: NEW_TASK)$/.test(lines[0] ?? '') &&
+    lines[1]?.startsWith('Task name: ') &&
+    lines[2]?.startsWith('Sender: ') &&
+    lines[3] === 'Payload:'
+  ) {
+    return lines.slice(4).join('\n').trim() || undefined
+  }
+  return text.trim() || undefined
 }
 
 // Explicit skill expansions are model context, not the user's recorded prompt.
